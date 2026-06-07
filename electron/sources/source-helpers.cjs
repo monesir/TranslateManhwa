@@ -6,6 +6,46 @@ function emptyPageResult(page) {
   };
 }
 
+async function fetchHtml(url, init = {}) {
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      "accept-language": "en-US,en;q=0.9,ar;q=0.8",
+      ...(init.headers ?? {}),
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${url}: ${response.status}`);
+  }
+
+  return response.text();
+}
+
+async function fetchCheerio(url, init = {}) {
+  const { load } = require("cheerio");
+  const html = await fetchHtml(url, init);
+  return load(html);
+}
+
+function parseTitleStatus(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+
+  if (!normalized) return "unknown";
+  if (/(ongoing|active|publishing)/.test(normalized)) return "ongoing";
+  if (/(completed|complete|finished)/.test(normalized)) return "completed";
+  if (/(hiatus|paused)/.test(normalized)) return "hiatus";
+  if (/(cancelled|canceled|dropped)/.test(normalized)) return "cancelled";
+
+  return "unknown";
+}
+
+function trimText(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
 function stripHtml(value) {
   if (!value) return null;
   const stripped = String(value)
@@ -78,11 +118,15 @@ function sleep(ms) {
 
 module.exports = {
   emptyPageResult,
+  fetchCheerio,
+  fetchHtml,
   getFirstName,
   normalizePage,
   normalizeSeriesType,
   normalizeStatus,
   parseChapterNumber,
+  parseTitleStatus,
   sleep,
   stripHtml,
+  trimText,
 };

@@ -25,23 +25,20 @@ D:\clwd\FloirsMNH\apps\desktop\src\services\sources
 - عقد موحد للمصدر `SourceRuntimeContract`.
 - سجل مصادر `source-registry`.
 - قدرات لكل مصدر مثل browse/search/details/chapters/pages/downloads.
-- مصادر جاهزة: `Azora`, `MangaSwat`, `MangaBat`, `Olympus`, و`Local Imports`.
+- المصدر الجاهز الحالي في هذا التطبيق: `MangaBat`.
 
 لكن لا ننقل نظام الإضافات كاملًا الآن. برنامج الترجمة يحتاج مصدرًا ثابتًا وقابلًا للتوسع أولًا، ثم نضيف plugins خارجية لاحقًا إذا احتجنا. نقل نظام plugins كاملًا في هذه المرحلة سيزيد التعقيد قبل وجود احتياج فعلي.
 
 ## القرار التنفيذي
 
-نبدأ بمصادر مدمجة داخل Electron:
+نبدأ بمصدر مدمج داخل Electron:
 
-- `Azora Manga`
-- `MangaSwat`
+- `MangaBat`
 
 سبب البدء بهما:
 
-- يعتمدان على API لا scraping HTML.
-- أسهل في الاختبار.
-- أقل هشاشة عند تغيّر تصميم الموقع.
-- يعطيان الواجهة شكل البيانات المطلوب سريعًا.
+- يعطي الواجهة شكل المصدر المطلوب للتجربة الأولى.
+- يدعم browse/search/details/chapters/pages.
 
 ثم نضيف لاحقًا:
 

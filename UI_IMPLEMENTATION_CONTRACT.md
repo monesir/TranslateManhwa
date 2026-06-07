@@ -592,6 +592,6 @@ window.florisApi.getSourceTitleDetails(sourceId, titleId)
 window.florisApi.getSourceChapterPages(sourceId, titleId, chapterId)
 ```
 
-يجب على واجهة الإكسبلور استخدام هذه الدوال بدل الاعتماد على `listExplorerSeries()` القديمة عندما تعمل داخل Electron. المصادر المبدئية هي `azora.series` و`mangaswat.series`.
+يجب على واجهة الإكسبلور استخدام هذه الدوال بدل الاعتماد على `listExplorerSeries()` القديمة عندما تعمل داخل Electron. المصدر المبدئي الحالي هو `mangabat.series`.
 
 ملاحظة مهمة: `canReadChapters` يعني أن المصدر يستطيع إرجاع الفصول وروابط الصفحات. أما `canDownload` فهو `false` حاليًا إلى أن ننفذ workflow تحميل/استيراد الفصل إلى قاعدة بيانات المشروع.

@@ -26,23 +26,14 @@ function deriveTitleActions(capabilities) {
   };
 }
 
-const AZORA_SOURCE_ID = "azora.series";
-const MANGASWAT_SOURCE_ID = "mangaswat.series";
+const MANGABAT_SOURCE_ID = "mangabat.series";
 
-const AZORA_SOURCE_METADATA = {
+const MANGABAT_SOURCE_METADATA = {
   pluginId: BUILT_IN_PLUGIN_ID,
-  sourceId: AZORA_SOURCE_ID,
-  displayName: "Azora Manga",
-  language: "ar",
-  baseUrl: "https://azoramoon.com",
-};
-
-const MANGASWAT_SOURCE_METADATA = {
-  pluginId: BUILT_IN_PLUGIN_ID,
-  sourceId: MANGASWAT_SOURCE_ID,
-  displayName: "MangaSwat",
-  language: "ar",
-  baseUrl: "https://meshmanga.com",
+  sourceId: MANGABAT_SOURCE_ID,
+  displayName: "MangaBat",
+  language: "en",
+  baseUrl: "https://www.mangabats.com",
 };
 
 const SOURCE_READER_CAPABILITIES = createCapabilities({
@@ -54,25 +45,17 @@ const SOURCE_READER_CAPABILITIES = createCapabilities({
   downloads: false,
 });
 
-const AZORA_SOURCE_RECORD = {
-  ...AZORA_SOURCE_METADATA,
-  capabilities: SOURCE_READER_CAPABILITIES,
-};
-
-const MANGASWAT_SOURCE_RECORD = {
-  ...MANGASWAT_SOURCE_METADATA,
+const MANGABAT_SOURCE_RECORD = {
+  ...MANGABAT_SOURCE_METADATA,
   capabilities: SOURCE_READER_CAPABILITIES,
 };
 
 module.exports = {
-  AZORA_SOURCE_ID,
-  AZORA_SOURCE_METADATA,
-  AZORA_SOURCE_RECORD,
   BUILT_IN_PLUGIN_ID,
   EMPTY_SOURCE_CAPABILITIES,
-  MANGASWAT_SOURCE_ID,
-  MANGASWAT_SOURCE_METADATA,
-  MANGASWAT_SOURCE_RECORD,
+  MANGABAT_SOURCE_ID,
+  MANGABAT_SOURCE_METADATA,
+  MANGABAT_SOURCE_RECORD,
   createCapabilities,
   deriveTitleActions,
 };

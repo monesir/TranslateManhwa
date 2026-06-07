@@ -1,10 +1,8 @@
-const { azoraSourceRuntime } = require("./azora-source.cjs");
-const { mangaswatSourceRuntime } = require("./mangaswat-source.cjs");
+const { mangabatSourceRuntime } = require("./mangabat-source.cjs");
 const { deriveTitleActions } = require("./source-contracts.cjs");
 
 const builtInSourceRuntimes = [
-  azoraSourceRuntime,
-  mangaswatSourceRuntime,
+  mangabatSourceRuntime,
 ];
 
 function getActiveSourceRuntimes() {
