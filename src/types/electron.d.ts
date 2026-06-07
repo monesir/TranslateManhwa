@@ -29,6 +29,7 @@ interface FlorisApi {
     categories: string[];
   }>;
   getChapterForTranslation(chapterId: string): Promise<ChapterTranslationWorkspace | undefined>;
+  prepareLibraryChapter(chapterId: string): Promise<SourceChapterPreparationResult>;
   updateFinalTranslation(textUnitId: string, text: string): Promise<TextUnit>;
   addCharacter(projectId: string, input: CharacterInput): Promise<Character>;
   updateCharacter(

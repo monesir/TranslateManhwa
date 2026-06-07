@@ -9,6 +9,8 @@ function registerIpcHandlers(appApi) {
     "data:getProjectDictionary": (_event, projectId) => appApi.getProjectDictionary(projectId),
     "data:getChapterForTranslation": (_event, chapterId) =>
       appApi.getChapterForTranslation(chapterId),
+    "data:prepareLibraryChapter": (_event, chapterId) =>
+      appApi.prepareLibraryChapter(chapterId),
     "data:updateFinalTranslation": (_event, textUnitId, text) =>
       appApi.updateFinalTranslation(textUnitId, text),
     "data:addCharacter": (_event, projectId, input) => appApi.addCharacter(projectId, input),

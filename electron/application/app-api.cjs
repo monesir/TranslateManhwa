@@ -1,7 +1,10 @@
 const { ProjectRepository } = require("../data/repositories/project-repository.cjs");
 const { ChapterRepository } = require("../data/repositories/chapter-repository.cjs");
 const { DictionaryRepository } = require("../data/repositories/dictionary-repository.cjs");
-const { SourceImportRepository } = require("../data/repositories/source-import-repository.cjs");
+const {
+  SourceImportRepository,
+  sourceChapterId,
+} = require("../data/repositories/source-import-repository.cjs");
 const {
   TranslationWorkspaceRepository,
 } = require("../data/repositories/translation-workspace-repository.cjs");
@@ -112,6 +115,39 @@ function createAppApi(db) {
 
       const pages = await getSourceChapterPages(sourceId, titleId, chapterId);
       return sourceImportRepository.prepareChapter(sourceId, sourceResult, chapter, pages);
+    },
+
+    async prepareLibraryChapter(chapterId) {
+      const chapter = chapterRepository.getChapter(chapterId);
+      if (!chapter) {
+        throw new Error(`Chapter not found: ${chapterId}`);
+      }
+
+      if (chapter.pagesCount > 0) {
+        return {
+          projectId: chapter.projectId,
+          chapterId: chapter.id,
+          pagesCount: chapter.pagesCount,
+          chapter,
+        };
+      }
+
+      const source = sourceImportRepository.getChapterSource(chapterId);
+      if (!source) {
+        throw new Error("Chapter pages are not prepared and no source link is available");
+      }
+
+      const sourceResult = await getSourceTitleDetails(source.sourceId, source.titleId);
+      const sourceChapter = sourceResult.chapters.find(
+        (item) => sourceChapterId(source.projectId, item.chapterId) === chapterId,
+      );
+
+      if (!sourceChapter) {
+        throw new Error(`Source chapter not found for local chapter: ${chapterId}`);
+      }
+
+      const pages = await getSourceChapterPages(source.sourceId, source.titleId, sourceChapter.chapterId);
+      return sourceImportRepository.prepareChapter(source.sourceId, sourceResult, sourceChapter, pages);
     },
   };
 }

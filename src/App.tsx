@@ -56,6 +56,7 @@ import {
   listProjectChapters,
   listProjects,
   listSourceCatalog,
+  prepareLibraryChapter,
   prepareSourceChapter,
   searchSourceTitles,
   updateCharacter,
@@ -787,17 +788,7 @@ function SourceChapterRow({
       <strong>{chapter.chapterNumber == null ? "Chapter" : `Chapter ${chapter.chapterNumber}`}</strong>
       <span>{chapter.title || "Untitled"}</span>
       <span className={`status-chip ${statusClass(chapter.availability)}`}>
-        {chapter.availabilityLabel ?? chapter.availability}
-      </span>
-      <span className="chapter-row-action">
-        {isPreparing ? (
-          <>
-            <RefreshCw className="spin" size={14} />
-            Loading
-          </>
-        ) : (
-          "Read"
-        )}
+        {isPreparing ? "Loading" : chapter.availabilityLabel ?? chapter.availability}
       </span>
     </button>
   );
@@ -894,9 +885,22 @@ function OverviewTab({ overview }: { overview: ProjectOverview }) {
 }
 
 function ChaptersTab({ projectId }: { projectId: string }) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const chaptersQuery = useQuery({
     queryKey: ["project-chapters", projectId],
     queryFn: () => listProjectChapters(projectId),
+  });
+  const prepareChapterMutation = useMutation({
+    mutationFn: (chapterId: string) => prepareLibraryChapter(chapterId),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["library-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", result.projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", result.projectId] });
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      navigate(`/projects/${result.projectId}/chapters/${result.chapterId}/translate`);
+    },
   });
 
   if (chaptersQuery.isLoading) return <LoadingPanel label="Loading chapters" />;
@@ -908,29 +912,57 @@ function ChaptersTab({ projectId }: { projectId: string }) {
         <h2>Chapters</h2>
         <span>{rows.length} chapters</span>
       </div>
+      {prepareChapterMutation.isError ? (
+        <p className="error-line">
+          {prepareChapterMutation.error instanceof Error
+            ? prepareChapterMutation.error.message
+            : "Could not prepare chapter"}
+        </p>
+      ) : null}
       <div className="chapter-list">
         {rows.map((chapter) => (
-          <ChapterRow key={chapter.id} chapter={chapter} />
+          <ChapterRow
+            key={chapter.id}
+            chapter={chapter}
+            isPreparing={
+              prepareChapterMutation.isPending &&
+              prepareChapterMutation.variables === chapter.id
+            }
+            onOpen={() => prepareChapterMutation.mutate(chapter.id)}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function ChapterRow({ chapter }: { chapter: Chapter }) {
+function ChapterRow({
+  chapter,
+  isPreparing,
+  onOpen,
+}: {
+  chapter: Chapter;
+  isPreparing: boolean;
+  onOpen: () => void;
+}) {
   return (
-    <Link className="chapter-row chapter-row-link" to={`/projects/${chapter.projectId}/chapters/${chapter.id}/translate`}>
+    <button
+      className="chapter-row chapter-row-button"
+      type="button"
+      disabled={isPreparing}
+      onClick={onOpen}
+    >
       <strong>{chapter.displayLabel}</strong>
       <span>{chapter.title ?? "Untitled"}</span>
       <span className={`status-chip ${statusClass(chapter.status)}`}>{chapter.status}</span>
-      <span className="internal-status">{chapter.internalStatus}</span>
+      <span className="internal-status">{isPreparing ? "Preparing pages" : chapter.internalStatus}</span>
       <span>{chapter.pagesCount} pages</span>
       <span>{chapter.textUnitsCount} text units</span>
       <div className="row-progress">
         <ProgressBar value={chapter.progress} />
         <small>{chapter.progress}%</small>
       </div>
-    </Link>
+    </button>
   );
 }
 

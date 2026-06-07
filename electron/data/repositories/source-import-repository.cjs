@@ -66,6 +66,29 @@ class SourceImportRepository {
     return row?.id ?? null;
   }
 
+  getChapterSource(chapterId) {
+    const row = this.db.prepare(`
+      SELECT
+        c.id AS chapter_id,
+        c.project_id,
+        ps.source_key,
+        ps.external_id AS title_id
+      FROM chapters c
+      JOIN project_sources ps ON ps.project_id = c.project_id
+      WHERE c.id = ?
+      LIMIT 1
+    `).get(chapterId);
+
+    if (!row) return null;
+
+    return {
+      chapterId: row.chapter_id,
+      projectId: row.project_id,
+      sourceId: row.source_key,
+      titleId: row.title_id,
+    };
+  }
+
   ensureProject(sourceId, sourceResult) {
     const timestamp = new Date().toISOString();
     const details = sourceResult.details;

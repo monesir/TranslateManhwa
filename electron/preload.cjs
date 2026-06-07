@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("florisApi", {
   listProjectChapters: invoke("data:listProjectChapters"),
   getProjectDictionary: invoke("data:getProjectDictionary"),
   getChapterForTranslation: invoke("data:getChapterForTranslation"),
+  prepareLibraryChapter: invoke("data:prepareLibraryChapter"),
   updateFinalTranslation: invoke("data:updateFinalTranslation"),
   addCharacter: invoke("data:addCharacter"),
   updateCharacter: invoke("data:updateCharacter"),

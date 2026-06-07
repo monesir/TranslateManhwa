@@ -756,7 +756,6 @@ h3 {
   font-size: 13px;
 }
 
-.chapter-row-link,
 .chapter-row-button {
   width: 100%;
   text-align: left;
@@ -767,14 +766,12 @@ h3 {
   appearance: none;
 }
 
-.chapter-row-link:hover,
 .chapter-row-button:hover:not(:disabled) {
   border-color: #5b6970;
   background: #1a2228;
   color: var(--text);
 }
 
-.chapter-row-link:focus-visible,
 .chapter-row-button:focus-visible {
   outline: 2px solid var(--accent-2);
   outline-offset: 2px;
@@ -790,20 +787,11 @@ h3 {
 }
 
 .source-chapters .chapter-row {
-  grid-template-columns: 126px minmax(0, 1fr) 120px 76px;
+  grid-template-columns: 126px minmax(0, 1fr) 120px;
 }
 
 .chapter-row strong {
   color: var(--text);
-}
-
-.chapter-row-action {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .internal-status {

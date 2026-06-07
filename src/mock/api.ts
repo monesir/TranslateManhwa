@@ -143,6 +143,14 @@ export async function prepareSourceChapter(
   throw new Error("Chapter preparation requires the Electron runtime");
 }
 
+export async function prepareLibraryChapter(
+  chapterId: string,
+): Promise<SourceChapterPreparationResult> {
+  if (window.florisApi) return window.florisApi.prepareLibraryChapter(chapterId);
+  void chapterId;
+  throw new Error("Library chapter preparation requires the Electron runtime");
+}
+
 export async function getProjectOverview(projectId: string): Promise<ProjectOverview | undefined> {
   if (window.florisApi) return window.florisApi.getProjectOverview(projectId);
   return delay(projectOverviews.find((project) => project.id === projectId));
