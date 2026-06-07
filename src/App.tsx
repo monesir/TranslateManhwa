@@ -1472,6 +1472,9 @@ function TranslationPage() {
   const { projectId, chapterId } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [viewerMode, setViewerMode] = useState<"page" | "webtoon">("page");
+  const [mergePages, setMergePages] = useState(false);
   const {
     selectedPageId,
     selectedTextUnitId,
@@ -1496,19 +1499,39 @@ function TranslationPage() {
   });
 
   const workspace = workspaceQuery.data;
+  const textUnitsByPage = useMemo(() => {
+    const groups = new Map<string, TextUnit[]>();
+    for (const unit of workspace?.textUnits ?? []) {
+      const group = groups.get(unit.pageId) ?? [];
+      group.push(unit);
+      groups.set(unit.pageId, group);
+    }
+    return groups;
+  }, [workspace]);
 
   useEffect(() => {
     if (!workspace) return;
-    if (!selectedPageId) setSelectedPageId(workspace.pages[0]?.id);
-    if (!selectedTextUnitId) setSelectedTextUnitId(workspace.textUnits[0]?.id);
+    const firstPageId = workspace.pages[0]?.id;
+    const firstTextUnitId = workspace.textUnits[0]?.id;
+    const hasSelectedPage = workspace.pages.some((page) => page.id === selectedPageId);
+    const hasSelectedTextUnit = workspace.textUnits.some((unit) => unit.id === selectedTextUnitId);
+    if (!hasSelectedPage && firstPageId) setSelectedPageId(firstPageId);
+    if (!hasSelectedTextUnit && firstTextUnitId) setSelectedTextUnitId(firstTextUnitId);
   }, [workspace, selectedPageId, selectedTextUnitId, setSelectedPageId, setSelectedTextUnitId]);
+
+  useEffect(() => {
+    if (viewerMode !== "webtoon" || !selectedPageId) return;
+    window.requestAnimationFrame(() => {
+      pageRefs.current[selectedPageId]?.scrollIntoView({ block: "start" });
+    });
+  }, [selectedPageId, viewerMode]);
 
   if (workspaceQuery.isLoading) return <LoadingPanel label="Loading translation workspace" />;
   if (!workspace) return <EmptyPanel label="Chapter not found" />;
   if (workspace.pages.length === 0) return <EmptyPanel label="Chapter pages are not prepared yet" />;
 
   const currentPage = workspace.pages.find((page) => page.id === selectedPageId) ?? workspace.pages[0];
-  const pageTextUnits = workspace.textUnits.filter((unit) => unit.pageId === currentPage?.id);
+  const pageTextUnits = textUnitsByPage.get(currentPage.id) ?? [];
   const selectedTextUnit =
     workspace.textUnits.find((unit) => unit.id === selectedTextUnitId) ?? workspace.textUnits[0];
 
@@ -1518,6 +1541,18 @@ function TranslationPage() {
   const matchedTerms = workspace.glossaryTerms.filter((term) =>
     selectedTextUnit?.matchedGlossaryTermIds.includes(term.id),
   );
+  const selectPage = (pageId: string) => {
+    setSelectedPageId(pageId);
+    if (viewerMode === "webtoon") {
+      window.requestAnimationFrame(() => {
+        pageRefs.current[pageId]?.scrollIntoView({ block: "start" });
+      });
+    }
+  };
+  const selectTextUnit = (unit: TextUnit) => {
+    setSelectedTextUnitId(unit.id);
+    selectPage(unit.pageId);
+  };
 
   return (
     <section className="translation-screen">
@@ -1547,10 +1582,7 @@ function TranslationPage() {
                 key={unit.id}
                 unit={unit}
                 selected={unit.id === selectedTextUnit?.id}
-                onSelect={() => {
-                  setSelectedTextUnitId(unit.id);
-                  setSelectedPageId(unit.pageId);
-                }}
+                onSelect={() => selectTextUnit(unit)}
                 onFinalChange={(text) => mutation.mutate({ id: unit.id, text })}
               />
             ))}
@@ -1568,12 +1600,35 @@ function TranslationPage() {
                 <ZoomIn size={16} />
               </button>
             </div>
+            <div className="viewer-mode-controls">
+              <button
+                className={viewerMode === "page" ? "active" : ""}
+                onClick={() => setViewerMode("page")}
+              >
+                Page
+              </button>
+              <button
+                className={viewerMode === "webtoon" ? "active" : ""}
+                onClick={() => setViewerMode("webtoon")}
+              >
+                Webtoon
+              </button>
+              <label className={viewerMode === "webtoon" ? "merge-toggle" : "merge-toggle disabled"}>
+                <input
+                  type="checkbox"
+                  checked={mergePages}
+                  disabled={viewerMode !== "webtoon"}
+                  onChange={(event) => setMergePages(event.target.checked)}
+                />
+                Merge pages
+              </label>
+            </div>
             <div className="page-switcher">
               {workspace.pages.map((page) => (
                 <button
                   key={page.id}
                   className={page.id === currentPage.id ? "active" : ""}
-                  onClick={() => setSelectedPageId(page.id)}
+                  onClick={() => selectPage(page.id)}
                 >
                   {page.index}
                 </button>
@@ -1581,38 +1636,88 @@ function TranslationPage() {
             </div>
           </div>
 
-          <div className="page-stage">
-            <div
-              className={`mock-page page-tone-${currentPage.imageTone}`}
-              style={{
-                width: currentPage.width * zoom,
-                height: currentPage.height * zoom,
-              }}
-            >
-              {isRenderableImageUrl(currentPage.imageUrl) ? (
-                <img className="page-image" src={currentPage.imageUrl ?? ""} alt={`Page ${currentPage.index}`} />
-              ) : (
-                <>
-                  <div className="mock-panel panel-a" />
-                  <div className="mock-panel panel-b" />
-                  <div className="mock-panel panel-c" />
-                </>
-              )}
-              <svg className="region-layer" viewBox={`0 0 ${currentPage.width} ${currentPage.height}`}>
-                {pageTextUnits.map((unit) => (
-                  <rect
-                    key={unit.id}
-                    x={unit.region.x}
-                    y={unit.region.y}
-                    width={unit.region.width}
-                    height={unit.region.height}
-                    rx={12}
-                    className={unit.id === selectedTextUnit?.id ? "region selected" : "region"}
-                    onClick={() => setSelectedTextUnitId(unit.id)}
-                  />
-                ))}
-              </svg>
-            </div>
+          <div className={viewerMode === "webtoon" ? "page-stage webtoon-stage" : "page-stage"}>
+            {viewerMode === "page" ? (
+              <div
+                className={`mock-page page-tone-${currentPage.imageTone}`}
+                style={{
+                  width: currentPage.width * zoom,
+                  height: currentPage.height * zoom,
+                }}
+              >
+                {isRenderableImageUrl(currentPage.imageUrl) ? (
+                  <img className="page-image" src={currentPage.imageUrl ?? ""} alt={`Page ${currentPage.index}`} />
+                ) : (
+                  <>
+                    <div className="mock-panel panel-a" />
+                    <div className="mock-panel panel-b" />
+                    <div className="mock-panel panel-c" />
+                  </>
+                )}
+                <svg className="region-layer" viewBox={`0 0 ${currentPage.width} ${currentPage.height}`}>
+                  {pageTextUnits.map((unit) => (
+                    <rect
+                      key={unit.id}
+                      x={unit.region.x}
+                      y={unit.region.y}
+                      width={unit.region.width}
+                      height={unit.region.height}
+                      rx={12}
+                      className={unit.id === selectedTextUnit?.id ? "region selected" : "region"}
+                      onClick={() => setSelectedTextUnitId(unit.id)}
+                    />
+                  ))}
+                </svg>
+              </div>
+            ) : (
+              <div className={mergePages ? "webtoon-page-stack merged" : "webtoon-page-stack"}>
+                {workspace.pages.map((page) => {
+                  const units = textUnitsByPage.get(page.id) ?? [];
+                  return (
+                    <div
+                      className={page.id === currentPage.id ? "webtoon-page-anchor active" : "webtoon-page-anchor"}
+                      data-page-index={page.index}
+                      key={page.id}
+                      ref={(element) => {
+                        pageRefs.current[page.id] = element;
+                      }}
+                    >
+                      <div
+                        className={`mock-page webtoon-page-surface page-tone-${page.imageTone}`}
+                        style={{
+                          width: page.width * zoom,
+                          height: page.height * zoom,
+                        }}
+                      >
+                        {isRenderableImageUrl(page.imageUrl) ? (
+                          <img className="page-image" src={page.imageUrl ?? ""} alt={`Page ${page.index}`} />
+                        ) : (
+                          <>
+                            <div className="mock-panel panel-a" />
+                            <div className="mock-panel panel-b" />
+                            <div className="mock-panel panel-c" />
+                          </>
+                        )}
+                        <svg className="region-layer" viewBox={`0 0 ${page.width} ${page.height}`}>
+                          {units.map((unit) => (
+                            <rect
+                              key={unit.id}
+                              x={unit.region.x}
+                              y={unit.region.y}
+                              width={unit.region.width}
+                              height={unit.region.height}
+                              rx={12}
+                              className={unit.id === selectedTextUnit?.id ? "region selected" : "region"}
+                              onClick={() => selectTextUnit(unit)}
+                            />
+                          ))}
+                        </svg>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </main>
 

@@ -212,7 +212,8 @@ h3 {
 .details-actions,
 .topbar-actions,
 .inline-form,
-.page-switcher {
+.page-switcher,
+.viewer-mode-controls {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -224,7 +225,8 @@ h3 {
 .source-tab,
 .tabs button,
 .subtabs button,
-.page-switcher button {
+.page-switcher button,
+.viewer-mode-controls button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -622,7 +624,8 @@ h3 {
 .source-tab,
 .tabs button,
 .subtabs button,
-.page-switcher button {
+.page-switcher button,
+.viewer-mode-controls button {
   height: 34px;
   padding: 0 12px;
 }
@@ -630,7 +633,8 @@ h3 {
 .source-tab.active,
 .tabs button.active,
 .subtabs button.active,
-.page-switcher button.active {
+.page-switcher button.active,
+.viewer-mode-controls button.active {
   border-color: #6b552a;
   background: #2b2518;
   color: #f0c66d;
@@ -1158,15 +1162,108 @@ h3 {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--line);
   background: #12181d;
+}
+
+.page-viewer-toolbar .page-switcher:last-child {
+  max-width: min(52vw, 680px);
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.viewer-mode-controls {
+  flex: 0 0 auto;
+}
+
+.merge-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.merge-toggle input {
+  accent-color: var(--accent);
+}
+
+.merge-toggle.disabled {
+  color: var(--muted-2);
+  opacity: 0.64;
 }
 
 .page-stage {
   min-height: 0;
   overflow: auto;
   padding: 24px;
+}
+
+.webtoon-stage {
+  padding: 18px 24px;
+  scroll-behavior: smooth;
+}
+
+.webtoon-page-stack {
+  display: grid;
+  justify-content: center;
+  gap: 0;
+}
+
+.webtoon-page-anchor {
+  position: relative;
+  margin: 0;
+  scroll-margin-top: 8px;
+}
+
+.webtoon-page-anchor::before {
+  position: absolute;
+  top: 8px;
+  left: calc(50% - 48px);
+  z-index: 3;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(9, 12, 14, 0.76);
+  color: var(--muted);
+  content: "Page " attr(data-page-index);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.webtoon-page-anchor.active::before {
+  border-color: rgba(217, 164, 65, 0.58);
+  color: #f0c66d;
+}
+
+.webtoon-page-surface {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.webtoon-page-stack.merged .webtoon-page-anchor::before {
+  display: none;
+}
+
+.webtoon-page-stack.merged .webtoon-page-surface {
+  border-top: 0;
+  border-bottom: 0;
+}
+
+.webtoon-page-stack.merged .webtoon-page-anchor:first-child .webtoon-page-surface {
+  border-top: 1px solid #44515a;
+}
+
+.webtoon-page-stack.merged .webtoon-page-anchor:last-child .webtoon-page-surface {
+  border-bottom: 1px solid #44515a;
 }
 
 .mock-page {
