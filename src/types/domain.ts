@@ -218,6 +218,7 @@ export interface Page {
   chapterId: string;
   index: number;
   imageTone: string;
+  imageUrl: string | null;
   width: number;
   height: number;
 }
@@ -252,6 +253,19 @@ export interface ChapterTranslationWorkspace {
   textUnits: TextUnit[];
   characters: Character[];
   glossaryTerms: GlossaryTerm[];
+}
+
+export interface SourceProjectImportResult {
+  projectId: string;
+  created: boolean;
+  chaptersCount: number;
+}
+
+export interface SourceChapterPreparationResult {
+  projectId: string;
+  chapterId: string;
+  pagesCount: number;
+  chapter: Chapter;
 }
 
 export type ActiveTool =

@@ -10,8 +10,10 @@ import type {
   Project,
   ProjectOverview,
   SourceCatalogItem,
+  SourceChapterPreparationResult,
   SourceChapterPage,
   SourcePagedResult,
+  SourceProjectImportResult,
   SourceTitleDetailsResult,
   SourceTitleSummary,
   TextUnit,
@@ -117,6 +119,33 @@ export async function getSourceChapterPages(
 ): Promise<SourceChapterPage[]> {
   if (window.florisApi) return window.florisApi.getSourceChapterPages(sourceId, titleId, chapterId);
   return delay([]);
+}
+
+export async function ensureSourceProject(
+  sourceId: string,
+  titleId: string,
+): Promise<SourceProjectImportResult> {
+  if (window.florisApi) return window.florisApi.ensureSourceProject(sourceId, titleId);
+  return delay({
+    projectId: "project_solo_leveling",
+    created: false,
+    chaptersCount: chapters.filter((chapter) => chapter.projectId === "project_solo_leveling").length,
+  });
+}
+
+export async function prepareSourceChapter(
+  sourceId: string,
+  titleId: string,
+  chapterId: string,
+): Promise<SourceChapterPreparationResult> {
+  if (window.florisApi) return window.florisApi.prepareSourceChapter(sourceId, titleId, chapterId);
+  const chapter = chapters.find((item) => item.id === "chapter_012") ?? chapters[0];
+  return delay({
+    projectId: chapter.projectId,
+    chapterId: chapter.id,
+    pagesCount: pages.filter((page) => page.chapterId === chapter.id).length,
+    chapter,
+  });
 }
 
 export async function getProjectOverview(projectId: string): Promise<ProjectOverview | undefined> {

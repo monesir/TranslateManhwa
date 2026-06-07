@@ -32,6 +32,10 @@ function registerIpcHandlers(appApi) {
       appApi.getSourceTitleDetails(sourceId, titleId),
     "sources:getChapterPages": (_event, sourceId, titleId, chapterId) =>
       appApi.getSourceChapterPages(sourceId, titleId, chapterId),
+    "sources:ensureProject": (_event, sourceId, titleId) =>
+      appApi.ensureSourceProject(sourceId, titleId),
+    "sources:prepareChapter": (_event, sourceId, titleId, chapterId) =>
+      appApi.prepareSourceChapter(sourceId, titleId, chapterId),
   };
 
   for (const [channel, handler] of Object.entries(handlers)) {

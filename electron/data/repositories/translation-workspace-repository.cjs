@@ -31,7 +31,7 @@ class TranslationWorkspaceRepository {
 
     const project = mapProjectRow(projectRow);
     const pages = this.db.prepare(`
-      SELECT p.*, a.metadata_json AS asset_metadata_json
+      SELECT p.*, a.path AS asset_path, a.metadata_json AS asset_metadata_json
       FROM pages p
       JOIN assets a ON a.id = p.asset_id
       WHERE p.chapter_id = ?

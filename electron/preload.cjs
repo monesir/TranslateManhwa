@@ -31,4 +31,6 @@ contextBridge.exposeInMainWorld("florisApi", {
   searchSourceTitles: invoke("sources:search"),
   getSourceTitleDetails: invoke("sources:getTitleDetails"),
   getSourceChapterPages: invoke("sources:getChapterPages"),
+  ensureSourceProject: invoke("sources:ensureProject"),
+  prepareSourceChapter: invoke("sources:prepareChapter"),
 });

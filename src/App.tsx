@@ -44,6 +44,7 @@ import {
   browseSourceTitles,
   deleteCharacter,
   deleteGlossaryTerm,
+  ensureSourceProject,
   getChapterForTranslation,
   getExplorerSeriesDetails,
   getLibraryStats,
@@ -54,6 +55,7 @@ import {
   listProjectChapters,
   listProjects,
   listSourceCatalog,
+  prepareSourceChapter,
   searchSourceTitles,
   updateCharacter,
   updateFinalTranslation,
@@ -159,6 +161,10 @@ function termToForm(term: GlossaryTerm): TermFormState {
 
 function normalizeSearch(value: string) {
   return value.trim().toLocaleLowerCase();
+}
+
+function isRenderableImageUrl(value: string | null | undefined) {
+  return Boolean(value && /^(https?:|file:|data:)/.test(value));
 }
 
 function CoverArt({ tone, title }: { tone: string; title: string }) {
@@ -589,6 +595,7 @@ function SourceSeriesCard({ item, sourceId }: { item: SourceTitleSummary; source
 function ExplorerDetailsPage() {
   const { sourceId, titleId, externalSeriesId } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const sourceDetailsQuery = useQuery({
     queryKey: ["source-title-details", sourceId, titleId],
     queryFn: () => getSourceTitleDetails(sourceId ?? "", titleId ?? ""),
@@ -598,6 +605,27 @@ function ExplorerDetailsPage() {
     queryKey: ["explorer-details", externalSeriesId],
     queryFn: () => getExplorerSeriesDetails(externalSeriesId ?? ""),
     enabled: !sourceId && Boolean(externalSeriesId),
+  });
+  const addSourceProjectMutation = useMutation({
+    mutationFn: () => ensureSourceProject(sourceId ?? "", titleId ?? ""),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["library-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", result.projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", result.projectId] });
+      navigate(`/projects/${result.projectId}`);
+    },
+  });
+  const prepareChapterMutation = useMutation({
+    mutationFn: (chapterId: string) => prepareSourceChapter(sourceId ?? "", titleId ?? "", chapterId),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["library-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", result.projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", result.projectId] });
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      navigate(`/projects/${result.projectId}/chapters/${result.chapterId}/translate`);
+    },
   });
 
   if (sourceId && titleId) {
@@ -630,15 +658,33 @@ function ExplorerDetailsPage() {
               ))}
             </div>
             <div className="details-actions">
-              <button className="button primary">
+              <button
+                className="button primary"
+                disabled={addSourceProjectMutation.isPending}
+                onClick={() => addSourceProjectMutation.mutate()}
+              >
                 <Plus size={16} />
-                Add to Library
+                {addSourceProjectMutation.isPending ? "Adding" : "Add to Library"}
               </button>
               <a className="button secondary" href={sourceResult.details.canonicalUrl} target="_blank" rel="noreferrer">
                 <Compass size={16} />
                 Open source
               </a>
             </div>
+            {addSourceProjectMutation.isError ? (
+              <p className="error-line">
+                {addSourceProjectMutation.error instanceof Error
+                  ? addSourceProjectMutation.error.message
+                  : "Could not add series to library"}
+              </p>
+            ) : null}
+            {prepareChapterMutation.isError ? (
+              <p className="error-line">
+                {prepareChapterMutation.error instanceof Error
+                  ? prepareChapterMutation.error.message
+                  : "Could not prepare chapter"}
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -649,7 +695,15 @@ function ExplorerDetailsPage() {
           </div>
           <div className="chapter-list compact source-chapters">
             {sourceResult.chapters.map((chapter) => (
-              <SourceChapterRow chapter={chapter} key={chapter.chapterId} />
+              <SourceChapterRow
+                chapter={chapter}
+                key={chapter.chapterId}
+                isPreparing={
+                  prepareChapterMutation.isPending &&
+                  prepareChapterMutation.variables === chapter.chapterId
+                }
+                onPrepare={() => prepareChapterMutation.mutate(chapter.chapterId)}
+              />
             ))}
           </div>
         </div>
@@ -717,7 +771,15 @@ function ExplorerDetailsPage() {
   );
 }
 
-function SourceChapterRow({ chapter }: { chapter: SourceChapterSummary }) {
+function SourceChapterRow({
+  chapter,
+  isPreparing,
+  onPrepare,
+}: {
+  chapter: SourceChapterSummary;
+  isPreparing: boolean;
+  onPrepare: () => void;
+}) {
   return (
     <div className="chapter-row">
       <strong>{chapter.chapterNumber == null ? "Chapter" : `Chapter ${chapter.chapterNumber}`}</strong>
@@ -725,8 +787,13 @@ function SourceChapterRow({ chapter }: { chapter: SourceChapterSummary }) {
       <span className={`status-chip ${statusClass(chapter.availability)}`}>
         {chapter.availabilityLabel ?? chapter.availability}
       </span>
-      <button className="icon-button" title="Prepare chapter" disabled={chapter.availability !== "readable"}>
-        <Download size={16} />
+      <button
+        className="icon-button"
+        title="Prepare chapter"
+        disabled={chapter.availability !== "readable" || isPreparing}
+        onClick={onPrepare}
+      >
+        {isPreparing ? <RefreshCw className="spin" size={16} /> : <Download size={16} />}
       </button>
     </div>
   );
@@ -758,10 +825,17 @@ function ProjectPage() {
             ))}
           </div>
         </div>
-        <Link className="button primary hero-action" to={`/projects/${overview.id}/chapters/${overview.lastWorkedChapterId}/translate`}>
-          <Edit3 size={16} />
-          Open last chapter
-        </Link>
+        {overview.lastWorkedChapterId ? (
+          <Link className="button primary hero-action" to={`/projects/${overview.id}/chapters/${overview.lastWorkedChapterId}/translate`}>
+            <Edit3 size={16} />
+            Open last chapter
+          </Link>
+        ) : (
+          <button className="button secondary hero-action" disabled>
+            <Edit3 size={16} />
+            No prepared chapter
+          </button>
+        )}
       </header>
 
       <div className="tabs">
@@ -1424,6 +1498,7 @@ function TranslationPage() {
 
   if (workspaceQuery.isLoading) return <LoadingPanel label="Loading translation workspace" />;
   if (!workspace) return <EmptyPanel label="Chapter not found" />;
+  if (workspace.pages.length === 0) return <EmptyPanel label="Chapter pages are not prepared yet" />;
 
   const currentPage = workspace.pages.find((page) => page.id === selectedPageId) ?? workspace.pages[0];
   const pageTextUnits = workspace.textUnits.filter((unit) => unit.pageId === currentPage?.id);
@@ -1507,9 +1582,15 @@ function TranslationPage() {
                 height: currentPage.height * zoom,
               }}
             >
-              <div className="mock-panel panel-a" />
-              <div className="mock-panel panel-b" />
-              <div className="mock-panel panel-c" />
+              {isRenderableImageUrl(currentPage.imageUrl) ? (
+                <img className="page-image" src={currentPage.imageUrl ?? ""} alt={`Page ${currentPage.index}`} />
+              ) : (
+                <>
+                  <div className="mock-panel panel-a" />
+                  <div className="mock-panel panel-b" />
+                  <div className="mock-panel panel-c" />
+                </>
+              )}
               <svg className="region-layer" viewBox={`0 0 ${currentPage.width} ${currentPage.height}`}>
                 {pageTextUnits.map((unit) => (
                   <rect

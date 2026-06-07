@@ -91,6 +91,7 @@ function mapPageRow(row) {
     chapterId: row.chapter_id,
     index: Number(row.page_index),
     imageTone: coverToneFromMetadata(row.asset_metadata_json, "night"),
+    imageUrl: row.asset_path ?? null,
     width: Number(row.width ?? 820),
     height: Number(row.height ?? 1240),
   };

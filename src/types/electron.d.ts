@@ -9,8 +9,10 @@ import type {
   Project,
   ProjectOverview,
   SourceCatalogItem,
+  SourceChapterPreparationResult,
   SourceChapterPage,
   SourcePagedResult,
+  SourceProjectImportResult,
   SourceTitleDetailsResult,
   SourceTitleSummary,
   TextUnit,
@@ -60,6 +62,12 @@ interface FlorisApi {
     titleId: string,
     chapterId: string,
   ): Promise<SourceChapterPage[]>;
+  ensureSourceProject(sourceId: string, titleId: string): Promise<SourceProjectImportResult>;
+  prepareSourceChapter(
+    sourceId: string,
+    titleId: string,
+    chapterId: string,
+  ): Promise<SourceChapterPreparationResult>;
 }
 
 declare global {

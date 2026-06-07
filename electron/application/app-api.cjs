@@ -1,6 +1,7 @@
 const { ProjectRepository } = require("../data/repositories/project-repository.cjs");
 const { ChapterRepository } = require("../data/repositories/chapter-repository.cjs");
 const { DictionaryRepository } = require("../data/repositories/dictionary-repository.cjs");
+const { SourceImportRepository } = require("../data/repositories/source-import-repository.cjs");
 const {
   TranslationWorkspaceRepository,
 } = require("../data/repositories/translation-workspace-repository.cjs");
@@ -16,6 +17,7 @@ function createAppApi(db) {
   const projectRepository = new ProjectRepository(db);
   const chapterRepository = new ChapterRepository(db);
   const dictionaryRepository = new DictionaryRepository(db);
+  const sourceImportRepository = new SourceImportRepository(db);
   const translationWorkspaceRepository = new TranslationWorkspaceRepository(db);
 
   return {
@@ -93,6 +95,23 @@ function createAppApi(db) {
 
     getSourceChapterPages(sourceId, titleId, chapterId) {
       return getSourceChapterPages(sourceId, titleId, chapterId);
+    },
+
+    async ensureSourceProject(sourceId, titleId) {
+      const sourceResult = await getSourceTitleDetails(sourceId, titleId);
+      return sourceImportRepository.ensureProject(sourceId, sourceResult);
+    },
+
+    async prepareSourceChapter(sourceId, titleId, chapterId) {
+      const sourceResult = await getSourceTitleDetails(sourceId, titleId);
+      const chapter = sourceResult.chapters.find((item) => item.chapterId === chapterId);
+
+      if (!chapter) {
+        throw new Error(`Chapter not found: ${chapterId}`);
+      }
+
+      const pages = await getSourceChapterPages(sourceId, titleId, chapterId);
+      return sourceImportRepository.prepareChapter(sourceId, sourceResult, chapter, pages);
     },
   };
 }
