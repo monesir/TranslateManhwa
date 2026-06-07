@@ -212,21 +212,6 @@ function seedChapters(db, createdAt) {
 }
 
 function seedDictionary(db, createdAt, updatedAt) {
-  const categories = [
-    ["cat_title", "project_solo_leveling", "Title", createdAt, updatedAt],
-    ["cat_power", "project_solo_leveling", "Power System", createdAt, updatedAt],
-    ["cat_org", "project_solo_leveling", "Organization", createdAt, updatedAt],
-    ["cat_skill", "project_solo_leveling", "Skill", createdAt, updatedAt],
-  ];
-
-  for (const row of categories) {
-    insert(
-      db,
-      "INSERT INTO glossary_categories (id, project_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-      row,
-    );
-  }
-
   const characters = [
     ["character_jinwoo", "project_solo_leveling", "Sung Jinwoo", "سونغ جين وو", "Male", "Main character. Calm, direct, and emotionally restrained.", createdAt, updatedAt],
     ["character_cha", "project_solo_leveling", "Cha Hae-In", "تشا هاي إن", "Female", "Elite hunter. Formal tone in early interactions.", createdAt, updatedAt],
@@ -260,17 +245,17 @@ function seedDictionary(db, createdAt, updatedAt) {
   }
 
   const terms = [
-    ["term_shadow_monarch", "project_solo_leveling", "cat_title", "Shadow Monarch", "ملك الظلال", "Official title. Do not use ملك الظل.", createdAt, updatedAt],
-    ["term_mana_crystal", "project_solo_leveling", "cat_power", "Mana Crystal", "بلورة المانا", "Keep Mana as مانا.", createdAt, updatedAt],
-    ["term_hunter_association", "project_solo_leveling", "cat_org", "Hunter Association", "جمعية الصيادين", null, createdAt, updatedAt],
-    ["term_shadow_exchange", "project_solo_leveling", "cat_skill", "Shadow Exchange", "تبادل الظل", null, createdAt, updatedAt],
+    ["term_shadow_monarch", "project_solo_leveling", "Title", "Shadow Monarch", "ملك الظلال", "Official title. Do not use ملك الظل.", createdAt, updatedAt],
+    ["term_mana_crystal", "project_solo_leveling", "Power System", "Mana Crystal", "بلورة المانا", "Keep Mana as مانا.", createdAt, updatedAt],
+    ["term_hunter_association", "project_solo_leveling", "Organization", "Hunter Association", "جمعية الصيادين", null, createdAt, updatedAt],
+    ["term_shadow_exchange", "project_solo_leveling", "Skill", "Shadow Exchange", "تبادل الظل", null, createdAt, updatedAt],
   ];
 
   for (const row of terms) {
     insert(
       db,
       `INSERT INTO glossary_terms (
-        id, project_id, category_id, english_term, arabic_term, description, created_at, updated_at
+        id, project_id, category, english_term, arabic_term, description, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       row,
     );

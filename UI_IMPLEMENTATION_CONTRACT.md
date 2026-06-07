@@ -401,19 +401,12 @@ export interface Character {
   description?: string;
 }
 
-export interface GlossaryCategory {
-  id: string;
-  projectId: string;
-  name: string;
-}
-
 export interface GlossaryTerm {
   id: string;
   projectId: string;
   englishTerm: string;
   arabicTerm: string;
-  categoryId: string;
-  categoryName: string;
+  category: string;
   description?: string;
 }
 
@@ -501,9 +494,12 @@ getProjectDictionary(projectId)
 getChapterForTranslation(chapterId)
 updateFinalTranslation(textUnitId, text)
 addCharacter(projectId, input)
+updateCharacter(characterId, input)
+deleteCharacter(characterId)
 addCharacterAlias(characterId, input)
 addGlossaryTerm(projectId, input)
-addGlossaryCategory(projectId, name)
+updateGlossaryTerm(termId, input)
+deleteGlossaryTerm(termId)
 listSourceCatalog()
 browseSourceTitles(sourceId, page)
 searchSourceTitles(sourceId, query, page)

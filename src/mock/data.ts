@@ -2,7 +2,6 @@ import type {
   Chapter,
   Character,
   ExplorerSeriesDetails,
-  GlossaryCategory,
   GlossaryTerm,
   LibraryStats,
   Page,
@@ -239,13 +238,6 @@ export const chapters: Chapter[] = [
   },
 ];
 
-export const glossaryCategories: GlossaryCategory[] = [
-  { id: "cat_title", projectId: "project_solo_leveling", name: "Title" },
-  { id: "cat_power", projectId: "project_solo_leveling", name: "Power System" },
-  { id: "cat_org", projectId: "project_solo_leveling", name: "Organization" },
-  { id: "cat_skill", projectId: "project_solo_leveling", name: "Skill" },
-];
-
 export const characters: Character[] = [
   {
     id: "character_jinwoo",
@@ -284,8 +276,7 @@ export const glossaryTerms: GlossaryTerm[] = [
     projectId: "project_solo_leveling",
     englishTerm: "Shadow Monarch",
     arabicTerm: "ملك الظلال",
-    categoryId: "cat_title",
-    categoryName: "Title",
+    category: "Title",
     description: "Official title. Do not use ملك الظل.",
   },
   {
@@ -293,8 +284,7 @@ export const glossaryTerms: GlossaryTerm[] = [
     projectId: "project_solo_leveling",
     englishTerm: "Mana Crystal",
     arabicTerm: "بلورة المانا",
-    categoryId: "cat_power",
-    categoryName: "Power System",
+    category: "Power System",
     description: "Keep Mana as مانا.",
   },
   {
@@ -302,16 +292,14 @@ export const glossaryTerms: GlossaryTerm[] = [
     projectId: "project_solo_leveling",
     englishTerm: "Hunter Association",
     arabicTerm: "جمعية الصيادين",
-    categoryId: "cat_org",
-    categoryName: "Organization",
+    category: "Organization",
   },
   {
     id: "term_shadow_exchange",
     projectId: "project_solo_leveling",
     englishTerm: "Shadow Exchange",
     arabicTerm: "تبادل الظل",
-    categoryId: "cat_skill",
-    categoryName: "Skill",
+    category: "Skill",
   },
 ];
 

@@ -21,6 +21,12 @@ export interface CharacterAlias {
   arabic: string;
 }
 
+export interface CharacterAliasInput {
+  id?: string;
+  english: string;
+  arabic: string;
+}
+
 export interface Character {
   id: string;
   projectId: string;
@@ -31,10 +37,12 @@ export interface Character {
   description?: string;
 }
 
-export interface GlossaryCategory {
-  id: string;
-  projectId: string;
-  name: string;
+export interface CharacterInput {
+  englishName: string;
+  arabicName: string;
+  gender: Gender;
+  aliases: CharacterAliasInput[];
+  description?: string;
 }
 
 export interface GlossaryTerm {
@@ -42,10 +50,11 @@ export interface GlossaryTerm {
   projectId: string;
   englishTerm: string;
   arabicTerm: string;
-  categoryId: string;
-  categoryName: string;
+  category: string;
   description?: string;
 }
+
+export type GlossaryTermInput = Omit<GlossaryTerm, "id" | "projectId">;
 
 export interface Project {
   id: string;

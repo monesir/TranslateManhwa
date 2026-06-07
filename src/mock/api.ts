@@ -2,6 +2,8 @@ import type {
   ChapterTranslationWorkspace,
   Character,
   CharacterAlias,
+  CharacterInput,
+  GlossaryTermInput,
   ExplorerSeriesDetails,
   GlossaryTerm,
   LibraryStats,
@@ -18,7 +20,6 @@ import {
   characters,
   chapters,
   explorerSeries,
-  glossaryCategories,
   glossaryTerms,
   libraryStats,
   pages,
@@ -30,7 +31,29 @@ import {
 let mutableTextUnits: TextUnit[] = [...textUnits];
 let mutableCharacters: Character[] = [...characters];
 let mutableGlossaryTerms: GlossaryTerm[] = [...glossaryTerms];
-let mutableCategories = [...glossaryCategories];
+
+const defaultGlossaryCategories = [
+  "Title",
+  "Place",
+  "Organization",
+  "Skill",
+  "Power System",
+  "Item",
+  "Race",
+  "Rank",
+  "Faction",
+  "General Term",
+];
+
+function listMockCategories(projectId: string) {
+  const categories = new Set(defaultGlossaryCategories);
+  for (const term of mutableGlossaryTerms) {
+    if (term.projectId === projectId && term.category.trim()) {
+      categories.add(term.category);
+    }
+  }
+  return Array.from(categories).sort((a, b) => a.localeCompare(b));
+}
 
 const delay = <T>(value: T, ms = 120): Promise<T> =>
   new Promise((resolve) => {
@@ -111,7 +134,7 @@ export async function getProjectDictionary(projectId: string) {
   return delay({
     characters: mutableCharacters.filter((character) => character.projectId === projectId),
     glossaryTerms: mutableGlossaryTerms.filter((term) => term.projectId === projectId),
-    categories: mutableCategories.filter((category) => category.projectId === projectId),
+    categories: listMockCategories(projectId),
   });
 }
 
@@ -156,17 +179,60 @@ export async function updateFinalTranslation(textUnitId: string, text: string): 
 
 export async function addCharacter(
   projectId: string,
-  input: Omit<Character, "id" | "projectId">,
+  input: CharacterInput,
 ): Promise<Character> {
   if (window.florisApi) return window.florisApi.addCharacter(projectId, input);
 
   const character: Character = {
-    ...input,
     id: `character_${Date.now()}`,
     projectId,
+    englishName: input.englishName,
+    arabicName: input.arabicName,
+    gender: input.gender,
+    aliases: input.aliases.map((alias) => ({
+      id: alias.id ?? `alias_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      english: alias.english,
+      arabic: alias.arabic,
+    })),
+    description: input.description,
   };
   mutableCharacters = [...mutableCharacters, character];
   return delay(character);
+}
+
+export async function updateCharacter(
+  characterId: string,
+  input: CharacterInput,
+): Promise<Character> {
+  if (window.florisApi) return window.florisApi.updateCharacter(characterId, input);
+
+  const existing = mutableCharacters.find((character) => character.id === characterId);
+  if (!existing) throw new Error("Character not found");
+
+  const updated: Character = {
+    id: characterId,
+    projectId: existing.projectId,
+    englishName: input.englishName,
+    arabicName: input.arabicName,
+    gender: input.gender,
+    aliases: input.aliases.map((alias) => ({
+      id: alias.id ?? `alias_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      english: alias.english,
+      arabic: alias.arabic,
+    })),
+    description: input.description,
+  };
+  mutableCharacters = mutableCharacters.map((character) =>
+    character.id === characterId ? updated : character,
+  );
+  return delay(updated);
+}
+
+export async function deleteCharacter(characterId: string): Promise<{ id: string }> {
+  if (window.florisApi) return window.florisApi.deleteCharacter(characterId);
+
+  mutableCharacters = mutableCharacters.filter((character) => character.id !== characterId);
+  return delay({ id: characterId });
 }
 
 export async function addCharacterAlias(
@@ -189,21 +255,9 @@ export async function addCharacterAlias(
   return delay(alias);
 }
 
-export async function addGlossaryCategory(projectId: string, name: string) {
-  if (window.florisApi) return window.florisApi.addGlossaryCategory(projectId, name);
-
-  const category = {
-    id: `cat_${Date.now()}`,
-    projectId,
-    name,
-  };
-  mutableCategories = [...mutableCategories, category];
-  return delay(category);
-}
-
 export async function addGlossaryTerm(
   projectId: string,
-  input: Omit<GlossaryTerm, "id" | "projectId">,
+  input: GlossaryTermInput,
 ): Promise<GlossaryTerm> {
   if (window.florisApi) return window.florisApi.addGlossaryTerm(projectId, input);
 
@@ -214,4 +268,29 @@ export async function addGlossaryTerm(
   };
   mutableGlossaryTerms = [...mutableGlossaryTerms, term];
   return delay(term);
+}
+
+export async function updateGlossaryTerm(
+  termId: string,
+  input: GlossaryTermInput,
+): Promise<GlossaryTerm> {
+  if (window.florisApi) return window.florisApi.updateGlossaryTerm(termId, input);
+
+  const existing = mutableGlossaryTerms.find((term) => term.id === termId);
+  if (!existing) throw new Error("Glossary term not found");
+
+  const updated: GlossaryTerm = {
+    ...input,
+    id: termId,
+    projectId: existing.projectId,
+  };
+  mutableGlossaryTerms = mutableGlossaryTerms.map((term) => (term.id === termId ? updated : term));
+  return delay(updated);
+}
+
+export async function deleteGlossaryTerm(termId: string): Promise<{ id: string }> {
+  if (window.florisApi) return window.florisApi.deleteGlossaryTerm(termId);
+
+  mutableGlossaryTerms = mutableGlossaryTerms.filter((term) => term.id !== termId);
+  return delay({ id: termId });
 }

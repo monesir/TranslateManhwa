@@ -80,8 +80,7 @@ function mapGlossaryTermRow(row) {
     projectId: row.project_id,
     englishTerm: row.english_term,
     arabicTerm: row.arabic_term,
-    categoryId: row.category_id,
-    categoryName: row.category_name ?? "General",
+    category: row.category ?? row.category_name ?? "General Term",
     description: row.description ?? undefined,
   };
 }

@@ -51,16 +51,28 @@ function createAppApi(db) {
       return dictionaryRepository.addCharacter(projectId, input);
     },
 
+    updateCharacter(characterId, input) {
+      return dictionaryRepository.updateCharacter(characterId, input);
+    },
+
+    deleteCharacter(characterId) {
+      return dictionaryRepository.deleteCharacter(characterId);
+    },
+
     addCharacterAlias(characterId, input) {
       return dictionaryRepository.addCharacterAlias(characterId, input);
     },
 
-    addGlossaryCategory(projectId, name) {
-      return dictionaryRepository.addGlossaryCategory(projectId, name);
-    },
-
     addGlossaryTerm(projectId, input) {
       return dictionaryRepository.addGlossaryTerm(projectId, input);
+    },
+
+    updateGlossaryTerm(termId, input) {
+      return dictionaryRepository.updateGlossaryTerm(termId, input);
+    },
+
+    deleteGlossaryTerm(termId) {
+      return dictionaryRepository.deleteGlossaryTerm(termId);
     },
 
     listSourceCatalog() {

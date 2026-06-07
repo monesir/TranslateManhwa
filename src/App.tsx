@@ -28,16 +28,22 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Trash2,
   Type,
   Wand2,
+  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  addCharacter,
+  addGlossaryTerm,
   browseSourceTitles,
+  deleteCharacter,
+  deleteGlossaryTerm,
   getChapterForTranslation,
   getExplorerSeriesDetails,
   getLibraryStats,
@@ -49,12 +55,18 @@ import {
   listProjects,
   listSourceCatalog,
   searchSourceTitles,
+  updateCharacter,
   updateFinalTranslation,
+  updateGlossaryTerm,
 } from "./mock/api";
 import type {
   ActiveTool,
   Chapter,
   Character,
+  CharacterAliasInput,
+  CharacterInput,
+  Gender,
+  GlossaryTermInput,
   GlossaryTerm,
   Project,
   ProjectOverview,
@@ -75,6 +87,78 @@ function formatDate(value: string) {
 
 function statusClass(status: string) {
   return status.toLowerCase().replace(/\s+/g, "-");
+}
+
+const genderOptions: Gender[] = ["Male", "Female", "Unknown"];
+
+const fallbackGlossaryCategories = [
+  "Title",
+  "Place",
+  "Organization",
+  "Skill",
+  "Power System",
+  "Item",
+  "Race",
+  "Rank",
+  "Faction",
+  "General Term",
+];
+
+interface CharacterFormState {
+  englishName: string;
+  arabicName: string;
+  gender: Gender;
+  aliases: CharacterAliasInput[];
+  description: string;
+}
+
+interface TermFormState {
+  englishTerm: string;
+  arabicTerm: string;
+  category: string;
+  description: string;
+}
+
+function createEmptyCharacterForm(): CharacterFormState {
+  return {
+    englishName: "",
+    arabicName: "",
+    gender: "Unknown",
+    aliases: [],
+    description: "",
+  };
+}
+
+function characterToForm(character: Character): CharacterFormState {
+  return {
+    englishName: character.englishName,
+    arabicName: character.arabicName,
+    gender: character.gender,
+    aliases: character.aliases.map((alias) => ({ ...alias })),
+    description: character.description ?? "",
+  };
+}
+
+function createEmptyTermForm(): TermFormState {
+  return {
+    englishTerm: "",
+    arabicTerm: "",
+    category: "General Term",
+    description: "",
+  };
+}
+
+function termToForm(term: GlossaryTerm): TermFormState {
+  return {
+    englishTerm: term.englishTerm,
+    arabicTerm: term.arabicTerm,
+    category: term.category,
+    description: term.description ?? "",
+  };
+}
+
+function normalizeSearch(value: string) {
+  return value.trim().toLocaleLowerCase();
 }
 
 function CoverArt({ tone, title }: { tone: string; title: string }) {
@@ -166,6 +250,9 @@ function EmptyPanel({ label }: { label: string }) {
 }
 
 function AppShell() {
+  const runtimeLabel = window.florisApi ? "Electron runtime" : "Local UI build";
+  const dataLabel = window.florisApi ? "SQLite data" : "Mock data";
+
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
@@ -193,8 +280,8 @@ function AppShell() {
         </nav>
 
         <div className="sidebar-status">
-          <span>Local UI build</span>
-          <strong>Mock data</strong>
+          <span>{runtimeLabel}</span>
+          <strong>{dataLabel}</strong>
         </div>
       </aside>
 
@@ -774,15 +861,188 @@ function ChapterRow({ chapter }: { chapter: Chapter }) {
 
 function DictionaryTab({ projectId }: { projectId: string }) {
   const [section, setSection] = useState<"characters" | "glossary">("characters");
-  const [newCategory, setNewCategory] = useState("");
+  const [searchValue, setSearchValue] = useState("");
+  const [genderFilter, setGenderFilter] = useState<Gender | "All">("All");
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [editingCharacterId, setEditingCharacterId] = useState<string | null>(null);
+  const [characterForm, setCharacterForm] = useState<CharacterFormState | null>(null);
+  const [editingTermId, setEditingTermId] = useState<string | null>(null);
+  const [termForm, setTermForm] = useState<TermFormState | null>(null);
+  const queryClient = useQueryClient();
   const dictionaryQuery = useQuery({
     queryKey: ["project-dictionary", projectId],
     queryFn: () => getProjectDictionary(projectId),
   });
 
+  const refreshDictionary = () => {
+    queryClient.invalidateQueries({ queryKey: ["project-dictionary", projectId] });
+    queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    queryClient.invalidateQueries({ queryKey: ["projects"] });
+    queryClient.invalidateQueries({ queryKey: ["library-stats"] });
+  };
+
+  const addCharacterMutation = useMutation({
+    mutationFn: (input: CharacterInput) => addCharacter(projectId, input),
+    onSuccess: () => {
+      setCharacterForm(null);
+      setEditingCharacterId(null);
+      refreshDictionary();
+    },
+  });
+
+  const updateCharacterMutation = useMutation({
+    mutationFn: ({ characterId, input }: { characterId: string; input: CharacterInput }) =>
+      updateCharacter(characterId, input),
+    onSuccess: () => {
+      setCharacterForm(null);
+      setEditingCharacterId(null);
+      refreshDictionary();
+    },
+  });
+
+  const deleteCharacterMutation = useMutation({
+    mutationFn: (characterId: string) => deleteCharacter(characterId),
+    onSuccess: refreshDictionary,
+  });
+
+  const addTermMutation = useMutation({
+    mutationFn: (input: GlossaryTermInput) => addGlossaryTerm(projectId, input),
+    onSuccess: () => {
+      setTermForm(null);
+      setEditingTermId(null);
+      refreshDictionary();
+    },
+  });
+
+  const updateTermMutation = useMutation({
+    mutationFn: ({ termId, input }: { termId: string; input: GlossaryTermInput }) =>
+      updateGlossaryTerm(termId, input),
+    onSuccess: () => {
+      setTermForm(null);
+      setEditingTermId(null);
+      refreshDictionary();
+    },
+  });
+
+  const deleteTermMutation = useMutation({
+    mutationFn: (termId: string) => deleteGlossaryTerm(termId),
+    onSuccess: refreshDictionary,
+  });
+
   if (dictionaryQuery.isLoading) return <LoadingPanel label="Loading dictionary" />;
   const dictionary = dictionaryQuery.data;
   if (!dictionary) return <EmptyPanel label="Dictionary unavailable" />;
+
+  const normalizedSearch = normalizeSearch(searchValue);
+  const categoryOptions = Array.from(
+    new Set([...fallbackGlossaryCategories, ...dictionary.categories]),
+  ).sort((a, b) => a.localeCompare(b));
+
+  const filteredCharacters = dictionary.characters.filter((character) => {
+    const text = [
+      character.englishName,
+      character.arabicName,
+      character.gender,
+      character.description ?? "",
+      ...character.aliases.flatMap((alias) => [alias.english, alias.arabic]),
+    ].join(" ");
+    const matchesSearch = !normalizedSearch || normalizeSearch(text).includes(normalizedSearch);
+    const matchesGender = genderFilter === "All" || character.gender === genderFilter;
+    return matchesSearch && matchesGender;
+  });
+
+  const filteredTerms = dictionary.glossaryTerms.filter((term) => {
+    const text = [
+      term.englishTerm,
+      term.arabicTerm,
+      term.category,
+      term.description ?? "",
+    ].join(" ");
+    const matchesSearch = !normalizedSearch || normalizeSearch(text).includes(normalizedSearch);
+    const matchesCategory = categoryFilter === "All" || term.category === categoryFilter;
+    return matchesSearch && matchesCategory;
+  });
+
+  const characterMutationError =
+    addCharacterMutation.error ?? updateCharacterMutation.error ?? deleteCharacterMutation.error;
+  const termMutationError = addTermMutation.error ?? updateTermMutation.error ?? deleteTermMutation.error;
+  const isCharacterSaving = addCharacterMutation.isPending || updateCharacterMutation.isPending;
+  const isTermSaving = addTermMutation.isPending || updateTermMutation.isPending;
+
+  const openAddCharacter = () => {
+    setEditingCharacterId(null);
+    setCharacterForm(createEmptyCharacterForm());
+    setEditingTermId(null);
+    setTermForm(null);
+  };
+
+  const openEditCharacter = (character: Character) => {
+    setEditingCharacterId(character.id);
+    setCharacterForm(characterToForm(character));
+    setEditingTermId(null);
+    setTermForm(null);
+  };
+
+  const openAddTerm = () => {
+    setEditingTermId(null);
+    setTermForm(createEmptyTermForm());
+    setEditingCharacterId(null);
+    setCharacterForm(null);
+  };
+
+  const openEditTerm = (term: GlossaryTerm) => {
+    setEditingTermId(term.id);
+    setTermForm(termToForm(term));
+    setEditingCharacterId(null);
+    setCharacterForm(null);
+  };
+
+  const characterPayload = (): CharacterInput => {
+    if (!characterForm) throw new Error("Character form is closed");
+    return {
+      englishName: characterForm.englishName.trim(),
+      arabicName: characterForm.arabicName.trim(),
+      gender: characterForm.gender,
+      aliases: characterForm.aliases
+        .map((alias) => ({
+          id: alias.id,
+          english: alias.english.trim(),
+          arabic: alias.arabic.trim(),
+        }))
+        .filter((alias) => alias.english || alias.arabic),
+      description: characterForm.description.trim() || undefined,
+    };
+  };
+
+  const termPayload = (): GlossaryTermInput => {
+    if (!termForm) throw new Error("Term form is closed");
+    return {
+      englishTerm: termForm.englishTerm.trim(),
+      arabicTerm: termForm.arabicTerm.trim(),
+      category: termForm.category.trim() || "General Term",
+      description: termForm.description.trim() || undefined,
+    };
+  };
+
+  const submitCharacter = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const input = characterPayload();
+    if (editingCharacterId) {
+      updateCharacterMutation.mutate({ characterId: editingCharacterId, input });
+    } else {
+      addCharacterMutation.mutate(input);
+    }
+  };
+
+  const submitTerm = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const input = termPayload();
+    if (editingTermId) {
+      updateTermMutation.mutate({ termId: editingTermId, input });
+    } else {
+      addTermMutation.mutate(input);
+    }
+  };
 
   return (
     <div className="dictionary-view">
@@ -795,15 +1055,176 @@ function DictionaryTab({ projectId }: { projectId: string }) {
         </button>
       </div>
 
+      <div className="dictionary-toolbar">
+        <div className="search-box">
+          <Search size={16} />
+          <input
+            value={searchValue}
+            onChange={(event) => setSearchValue(event.target.value)}
+            placeholder={section === "characters" ? "Search characters" : "Search terms"}
+          />
+        </div>
+        {section === "characters" ? (
+          <select
+            className="field-select"
+            value={genderFilter}
+            onChange={(event) => setGenderFilter(event.target.value as Gender | "All")}
+          >
+            <option value="All">All genders</option>
+            {genderOptions.map((gender) => (
+              <option key={gender} value={gender}>{gender}</option>
+            ))}
+          </select>
+        ) : (
+          <select
+            className="field-select"
+            value={categoryFilter}
+            onChange={(event) => setCategoryFilter(event.target.value)}
+          >
+            <option value="All">All categories</option>
+            {categoryOptions.map((category) => (
+              <option key={category} value={category}>{category}</option>
+            ))}
+          </select>
+        )}
+      </div>
+
       {section === "characters" ? (
         <div className="table-card">
           <div className="table-title">
             <h2>Characters</h2>
-            <button className="button secondary">
+            <button className="button secondary" onClick={openAddCharacter}>
               <Plus size={16} />
               Add character
             </button>
           </div>
+          {characterForm ? (
+            <form className="dictionary-editor" onSubmit={submitCharacter}>
+              <div className="editor-grid">
+                <label className="form-field">
+                  <span>English Name</span>
+                  <input
+                    required
+                    value={characterForm.englishName}
+                    onChange={(event) =>
+                      setCharacterForm({ ...characterForm, englishName: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="form-field">
+                  <span>Arabic Name</span>
+                  <input
+                    required
+                    dir="rtl"
+                    value={characterForm.arabicName}
+                    onChange={(event) =>
+                      setCharacterForm({ ...characterForm, arabicName: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="form-field">
+                  <span>Gender</span>
+                  <select
+                    value={characterForm.gender}
+                    onChange={(event) =>
+                      setCharacterForm({ ...characterForm, gender: event.target.value as Gender })
+                    }
+                  >
+                    {genderOptions.map((gender) => (
+                      <option key={gender} value={gender}>{gender}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="form-field full">
+                  <span>Description</span>
+                  <textarea
+                    value={characterForm.description}
+                    onChange={(event) =>
+                      setCharacterForm({ ...characterForm, description: event.target.value })
+                    }
+                  />
+                </label>
+              </div>
+              <div className="alias-editor">
+                <div className="inline-heading">
+                  <strong>Aliases</strong>
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() =>
+                      setCharacterForm({
+                        ...characterForm,
+                        aliases: [...characterForm.aliases, { english: "", arabic: "" }],
+                      })
+                    }
+                  >
+                    <Plus size={15} />
+                    Add alias
+                  </button>
+                </div>
+                {characterForm.aliases.length === 0 ? (
+                  <p className="muted">No aliases.</p>
+                ) : null}
+                {characterForm.aliases.map((alias, index) => (
+                  <div className="alias-row" key={alias.id ?? index}>
+                    <input
+                      required
+                      value={alias.english}
+                      placeholder="English Alias"
+                      onChange={(event) => {
+                        const aliases = [...characterForm.aliases];
+                        aliases[index] = { ...alias, english: event.target.value };
+                        setCharacterForm({ ...characterForm, aliases });
+                      }}
+                    />
+                    <input
+                      required
+                      dir="rtl"
+                      value={alias.arabic}
+                      placeholder="Arabic Alias"
+                      onChange={(event) => {
+                        const aliases = [...characterForm.aliases];
+                        aliases[index] = { ...alias, arabic: event.target.value };
+                        setCharacterForm({ ...characterForm, aliases });
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="icon-button"
+                      title="Remove alias"
+                      onClick={() =>
+                        setCharacterForm({
+                          ...characterForm,
+                          aliases: characterForm.aliases.filter((_, aliasIndex) => aliasIndex !== index),
+                        })
+                      }
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              {characterMutationError ? (
+                <p className="error-line">{(characterMutationError as Error).message}</p>
+              ) : null}
+              <div className="form-actions">
+                <button className="button primary" disabled={isCharacterSaving} type="submit">
+                  <Save size={16} />
+                  {editingCharacterId ? "Save character" : "Create character"}
+                </button>
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={() => {
+                    setCharacterForm(null);
+                    setEditingCharacterId(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : null}
           <div className="dictionary-table characters-table">
             <div className="dictionary-head">
               <span>English Name</span>
@@ -811,8 +1232,9 @@ function DictionaryTab({ projectId }: { projectId: string }) {
               <span>Gender</span>
               <span>Aliases</span>
               <span>Description</span>
+              <span>Actions</span>
             </div>
-            {dictionary.characters.map((character) => (
+            {filteredCharacters.map((character) => (
               <div className="dictionary-row" key={character.id}>
                 <strong>{character.englishName}</strong>
                 <span dir="rtl">{character.arabicName}</span>
@@ -821,25 +1243,108 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                   {character.aliases.map((alias) => `${alias.english} / ${alias.arabic}`).join(", ") || "None"}
                 </span>
                 <span>{character.description ?? "No description"}</span>
+                <div className="row-actions">
+                  <button className="icon-button" title="Edit character" onClick={() => openEditCharacter(character)}>
+                    <Edit3 size={15} />
+                  </button>
+                  <button
+                    className="icon-button danger"
+                    title="Delete character"
+                    onClick={() => {
+                      if (window.confirm(`Delete ${character.englishName}?`)) {
+                        deleteCharacterMutation.mutate(character.id);
+                      }
+                    }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
             ))}
+            {filteredCharacters.length === 0 ? <EmptyPanel label="No matching characters" /> : null}
           </div>
         </div>
       ) : (
         <div className="table-card">
           <div className="table-title">
             <h2>General Glossary</h2>
-            <div className="inline-form">
-              <input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="New category" />
-              <button className="button secondary" onClick={() => setNewCategory("")}>
-                <Plus size={16} />
-                Add Category
-              </button>
-            </div>
+            <button className="button secondary" onClick={openAddTerm}>
+              <Plus size={16} />
+              Add term
+            </button>
           </div>
+          {termForm ? (
+            <form className="dictionary-editor" onSubmit={submitTerm}>
+              <div className="editor-grid">
+                <label className="form-field">
+                  <span>English Term</span>
+                  <input
+                    required
+                    value={termForm.englishTerm}
+                    onChange={(event) =>
+                      setTermForm({ ...termForm, englishTerm: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="form-field">
+                  <span>Arabic Term</span>
+                  <input
+                    required
+                    dir="rtl"
+                    value={termForm.arabicTerm}
+                    onChange={(event) =>
+                      setTermForm({ ...termForm, arabicTerm: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="form-field">
+                  <span>Category</span>
+                  <input
+                    required
+                    list="glossary-category-options"
+                    value={termForm.category}
+                    onChange={(event) => setTermForm({ ...termForm, category: event.target.value })}
+                  />
+                </label>
+                <label className="form-field full">
+                  <span>Description</span>
+                  <textarea
+                    value={termForm.description}
+                    onChange={(event) =>
+                      setTermForm({ ...termForm, description: event.target.value })
+                    }
+                  />
+                </label>
+              </div>
+              <datalist id="glossary-category-options">
+                {categoryOptions.map((category) => (
+                  <option key={category} value={category} />
+                ))}
+              </datalist>
+              {termMutationError ? (
+                <p className="error-line">{(termMutationError as Error).message}</p>
+              ) : null}
+              <div className="form-actions">
+                <button className="button primary" disabled={isTermSaving} type="submit">
+                  <Save size={16} />
+                  {editingTermId ? "Save term" : "Create term"}
+                </button>
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={() => {
+                    setTermForm(null);
+                    setEditingTermId(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : null}
           <div className="category-row">
-            {dictionary.categories.map((category) => (
-              <span key={category.id}>{category.name}</span>
+            {categoryOptions.map((category) => (
+              <span key={category}>{category}</span>
             ))}
           </div>
           <div className="dictionary-table terms-table">
@@ -848,15 +1353,33 @@ function DictionaryTab({ projectId }: { projectId: string }) {
               <span>Arabic Term</span>
               <span>Category</span>
               <span>Description</span>
+              <span>Actions</span>
             </div>
-            {dictionary.glossaryTerms.map((term) => (
+            {filteredTerms.map((term) => (
               <div className="dictionary-row" key={term.id}>
                 <strong>{term.englishTerm}</strong>
                 <span dir="rtl">{term.arabicTerm}</span>
-                <span>{term.categoryName}</span>
+                <span>{term.category}</span>
                 <span>{term.description ?? "No description"}</span>
+                <div className="row-actions">
+                  <button className="icon-button" title="Edit term" onClick={() => openEditTerm(term)}>
+                    <Edit3 size={15} />
+                  </button>
+                  <button
+                    className="icon-button danger"
+                    title="Delete term"
+                    onClick={() => {
+                      if (window.confirm(`Delete ${term.englishTerm}?`)) {
+                        deleteTermMutation.mutate(term.id);
+                      }
+                    }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
             ))}
+            {filteredTerms.length === 0 ? <EmptyPanel label="No matching terms" /> : null}
           </div>
         </div>
       )}
@@ -1077,7 +1600,7 @@ function MiniDictionary({
       ))}
       {terms.map((term) => (
         <div className="dictionary-match" key={term.id}>
-          <span>{term.categoryName}</span>
+          <span>{term.category}</span>
           <strong>{term.englishTerm}</strong>
           <em dir="rtl">{term.arabicTerm}</em>
         </div>

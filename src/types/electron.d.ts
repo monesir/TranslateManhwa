@@ -2,6 +2,8 @@ import type {
   ChapterTranslationWorkspace,
   Character,
   CharacterAlias,
+  CharacterInput,
+  GlossaryTermInput,
   GlossaryTerm,
   LibraryStats,
   Project,
@@ -22,20 +24,26 @@ interface FlorisApi {
   getProjectDictionary(projectId: string): Promise<{
     characters: Character[];
     glossaryTerms: GlossaryTerm[];
-    categories: import("./domain").GlossaryCategory[];
+    categories: string[];
   }>;
   getChapterForTranslation(chapterId: string): Promise<ChapterTranslationWorkspace | undefined>;
   updateFinalTranslation(textUnitId: string, text: string): Promise<TextUnit>;
-  addCharacter(projectId: string, input: Omit<Character, "id" | "projectId">): Promise<Character>;
+  addCharacter(projectId: string, input: CharacterInput): Promise<Character>;
+  updateCharacter(
+    characterId: string,
+    input: CharacterInput,
+  ): Promise<Character>;
+  deleteCharacter(characterId: string): Promise<{ id: string }>;
   addCharacterAlias(characterId: string, input: Omit<CharacterAlias, "id">): Promise<CharacterAlias>;
-  addGlossaryCategory(
-    projectId: string,
-    name: string,
-  ): Promise<import("./domain").GlossaryCategory>;
   addGlossaryTerm(
     projectId: string,
-    input: Omit<GlossaryTerm, "id" | "projectId">,
+    input: GlossaryTermInput,
   ): Promise<GlossaryTerm>;
+  updateGlossaryTerm(
+    termId: string,
+    input: GlossaryTermInput,
+  ): Promise<GlossaryTerm>;
+  deleteGlossaryTerm(termId: string): Promise<{ id: string }>;
   listSourceCatalog(): Promise<SourceCatalogItem[]>;
   browseSourceTitles(
     sourceId: string,

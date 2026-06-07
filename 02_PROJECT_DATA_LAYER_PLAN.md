@@ -536,29 +536,23 @@ CREATE TABLE character_aliases (
 );
 ```
 
-## 15. glossary_categories
+## 15. glossary_terms category field
 
 تصنيفات القاموس العام، وهي قابلة للإضافة.
 
 ```sql
-CREATE TABLE glossary_categories (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL,
-  name TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
+-- No standalone category table.
+-- Category is stored directly on glossary_terms.category.
 ```
 
 ## فهرس
 
 ```sql
-CREATE UNIQUE INDEX idx_glossary_categories_project_name
-ON glossary_categories(project_id, name);
+CREATE INDEX idx_glossary_terms_project_category
+ON glossary_terms(project_id, category);
 ```
 
-## 16. glossary_terms
+## 15. glossary_terms
 
 القاموس العام.
 
@@ -566,14 +560,13 @@ ON glossary_categories(project_id, name);
 CREATE TABLE glossary_terms (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,
-  category_id TEXT,
+  category TEXT NOT NULL DEFAULT 'General Term',
   english_term TEXT NOT NULL,
   arabic_term TEXT NOT NULL,
   description TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-  FOREIGN KEY (category_id) REFERENCES glossary_categories(id) ON DELETE SET NULL
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 ```
 
@@ -584,7 +577,7 @@ CREATE INDEX idx_glossary_terms_project
 ON glossary_terms(project_id);
 
 CREATE INDEX idx_glossary_terms_category
-ON glossary_terms(category_id);
+ON glossary_terms(project_id, category);
 ```
 
 ## 17. dictionary_matches
@@ -688,7 +681,6 @@ text_units 1----n translation_candidates
 projects 1----n characters
 characters 1----n character_aliases
 projects 1----n glossary_terms
-projects 1----n glossary_categories
 text_units 1----n dictionary_matches
 text_units 1----1/n typesetting_items
 ```
@@ -1024,7 +1016,6 @@ TranslationRepository.saveTranslationCandidates()
 
 - `characters`
 - `character_aliases`
-- `glossary_categories`
 - `glossary_terms`
 
 ويستخدمه:
@@ -1063,7 +1054,6 @@ TranslationRepository.saveTranslationCandidates()
 - text_units.
 - characters.
 - character_aliases.
-- glossary_categories.
 - glossary_terms.
 - translation_candidates.
 - ocr_candidates.

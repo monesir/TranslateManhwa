@@ -178,7 +178,6 @@ Page
 TextUnit
 Character
 CharacterAlias
-GlossaryCategory
 GlossaryTerm
 OcrRun
 OcrCandidate

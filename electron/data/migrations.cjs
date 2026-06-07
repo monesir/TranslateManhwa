@@ -203,26 +203,16 @@ const MIGRATIONS = [
           FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS glossary_categories (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          name TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-        );
-
         CREATE TABLE IF NOT EXISTS glossary_terms (
           id TEXT PRIMARY KEY,
           project_id TEXT NOT NULL,
-          category_id TEXT,
+          category TEXT NOT NULL DEFAULT 'General Term',
           english_term TEXT NOT NULL,
           arabic_term TEXT NOT NULL,
           description TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
-          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-          FOREIGN KEY (category_id) REFERENCES glossary_categories(id) ON DELETE SET NULL
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS dictionary_matches (
@@ -296,12 +286,49 @@ const MIGRATIONS = [
           ON characters(project_id);
         CREATE INDEX IF NOT EXISTS idx_character_aliases_character
           ON character_aliases(character_id);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_glossary_categories_project_name
-          ON glossary_categories(project_id, name);
         CREATE INDEX IF NOT EXISTS idx_glossary_terms_project
           ON glossary_terms(project_id);
         CREATE INDEX IF NOT EXISTS idx_glossary_terms_category
-          ON glossary_terms(category_id);
+          ON glossary_terms(project_id, category);
+      `);
+    },
+  },
+  {
+    version: 2,
+    name: "glossary_category_value",
+    up(db) {
+      const columns = db.prepare("PRAGMA table_info(glossary_terms)").all();
+      const hasCategory = columns.some((column) => column.name === "category");
+
+      if (!hasCategory) {
+        db.exec(`
+          ALTER TABLE glossary_terms
+          ADD COLUMN category TEXT NOT NULL DEFAULT 'General Term';
+        `);
+      }
+
+      const tables = db.prepare(`
+        SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'glossary_categories'
+      `).all();
+
+      if (tables.length > 0) {
+        db.exec(`
+          UPDATE glossary_terms
+          SET category = COALESCE(
+            (
+              SELECT gc.name
+              FROM glossary_categories gc
+              WHERE gc.id = glossary_terms.category_id
+            ),
+            NULLIF(category, ''),
+            'General Term'
+          );
+        `);
+      }
+
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_glossary_terms_project_category
+          ON glossary_terms(project_id, category);
       `);
     },
   },

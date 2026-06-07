@@ -12,12 +12,18 @@ function registerIpcHandlers(appApi) {
     "data:updateFinalTranslation": (_event, textUnitId, text) =>
       appApi.updateFinalTranslation(textUnitId, text),
     "data:addCharacter": (_event, projectId, input) => appApi.addCharacter(projectId, input),
+    "data:updateCharacter": (_event, characterId, input) =>
+      appApi.updateCharacter(characterId, input),
+    "data:deleteCharacter": (_event, characterId) =>
+      appApi.deleteCharacter(characterId),
     "data:addCharacterAlias": (_event, characterId, input) =>
       appApi.addCharacterAlias(characterId, input),
-    "data:addGlossaryCategory": (_event, projectId, name) =>
-      appApi.addGlossaryCategory(projectId, name),
     "data:addGlossaryTerm": (_event, projectId, input) =>
       appApi.addGlossaryTerm(projectId, input),
+    "data:updateGlossaryTerm": (_event, termId, input) =>
+      appApi.updateGlossaryTerm(termId, input),
+    "data:deleteGlossaryTerm": (_event, termId) =>
+      appApi.deleteGlossaryTerm(termId),
     "sources:listCatalog": () => appApi.listSourceCatalog(),
     "sources:browse": (_event, sourceId, page) => appApi.browseSourceTitles(sourceId, page),
     "sources:search": (_event, sourceId, query, page) =>
