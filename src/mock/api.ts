@@ -34,21 +34,8 @@ let mutableTextUnits: TextUnit[] = [...textUnits];
 let mutableCharacters: Character[] = [...characters];
 let mutableGlossaryTerms: GlossaryTerm[] = [...glossaryTerms];
 
-const defaultGlossaryCategories = [
-  "Title",
-  "Place",
-  "Organization",
-  "Skill",
-  "Power System",
-  "Item",
-  "Race",
-  "Rank",
-  "Faction",
-  "General Term",
-];
-
 function listMockCategories(projectId: string) {
-  const categories = new Set(defaultGlossaryCategories);
+  const categories = new Set<string>();
   for (const term of mutableGlossaryTerms) {
     if (term.projectId === projectId && term.category.trim()) {
       categories.add(term.category);

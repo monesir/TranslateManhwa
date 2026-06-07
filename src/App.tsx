@@ -95,19 +95,6 @@ function statusClass(status: string) {
 
 const genderOptions: Gender[] = ["Male", "Female", "Unknown"];
 
-const fallbackGlossaryCategories = [
-  "Title",
-  "Place",
-  "Organization",
-  "Skill",
-  "Power System",
-  "Item",
-  "Race",
-  "Rank",
-  "Faction",
-  "General Term",
-];
-
 interface CharacterFormState {
   englishName: string;
   arabicName: string;
@@ -1041,9 +1028,7 @@ function DictionaryTab({ projectId }: { projectId: string }) {
   if (!dictionary) return <EmptyPanel label="Dictionary unavailable" />;
 
   const normalizedSearch = normalizeSearch(searchValue);
-  const categoryOptions = Array.from(
-    new Set([...fallbackGlossaryCategories, ...dictionary.categories]),
-  ).sort((a, b) => a.localeCompare(b));
+  const categoryOptions = dictionary.categories;
 
   const filteredCharacters = dictionary.characters.filter((character) => {
     const text = [

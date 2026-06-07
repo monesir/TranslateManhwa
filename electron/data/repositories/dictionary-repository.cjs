@@ -4,19 +4,6 @@ const {
   mapGlossaryTermRow,
 } = require("./mappers.cjs");
 
-const DEFAULT_GLOSSARY_CATEGORIES = [
-  "Title",
-  "Place",
-  "Organization",
-  "Skill",
-  "Power System",
-  "Item",
-  "Race",
-  "Rank",
-  "Faction",
-  "General Term",
-];
-
 const GENDERS = new Set(["Male", "Female", "Unknown"]);
 
 function makeId(prefix) {
@@ -115,12 +102,7 @@ class DictionaryRepository {
       ORDER BY category COLLATE NOCASE ASC
     `).all(projectId);
 
-    const categories = new Set(DEFAULT_GLOSSARY_CATEGORIES);
-    for (const row of rows) {
-      categories.add(row.category);
-    }
-
-    return Array.from(categories).sort((a, b) => a.localeCompare(b));
+    return rows.map((row) => row.category);
   }
 
   addCharacter(projectId, input) {
@@ -409,6 +391,5 @@ class DictionaryRepository {
 }
 
 module.exports = {
-  DEFAULT_GLOSSARY_CATEGORIES,
   DictionaryRepository,
 };
