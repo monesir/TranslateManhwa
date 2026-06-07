@@ -33,18 +33,22 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  browseSourceTitles,
   getChapterForTranslation,
   getExplorerSeriesDetails,
   getLibraryStats,
   getProjectDictionary,
   getProjectOverview,
+  getSourceTitleDetails,
   listExplorerSeries,
   listProjectChapters,
   listProjects,
+  listSourceCatalog,
+  searchSourceTitles,
   updateFinalTranslation,
 } from "./mock/api";
 import type {
@@ -54,6 +58,8 @@ import type {
   GlossaryTerm,
   Project,
   ProjectOverview,
+  SourceChapterSummary,
+  SourceTitleSummary,
   TextUnit,
 } from "./types/domain";
 import { useTranslationWorkspaceStore } from "./stores/translation-workspace-store";
@@ -82,6 +88,26 @@ function CoverArt({ tone, title }: { tone: string; title: string }) {
     <div className={`cover-art tone-${tone}`} aria-label={`${title} cover`}>
       <div className="cover-grid" />
       <div className="cover-letters">{letters}</div>
+    </div>
+  );
+}
+
+function sourceTone(value: string) {
+  const tones = ["ember", "teal", "violet", "steel"];
+  const total = value.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return tones[total % tones.length];
+}
+
+function SourceCover({ imageUrl, title }: { imageUrl: string | null; title: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (!imageUrl || failed) {
+    return <CoverArt tone={sourceTone(title)} title={title} />;
+  }
+
+  return (
+    <div className="source-cover">
+      <img loading="lazy" src={imageUrl} alt={`${title} cover`} onError={() => setFailed(true)} />
     </div>
   );
 }
@@ -150,6 +176,7 @@ function AppShell() {
           <Route path="/" element={<Navigate to="/library" replace />} />
           <Route path="/library" element={<LibraryPage />} />
           <Route path="/explorer" element={<ExplorerPage />} />
+          <Route path="/explorer/:sourceId/:titleId" element={<ExplorerDetailsPage />} />
           <Route path="/explorer/:externalSeriesId" element={<ExplorerDetailsPage />} />
           <Route path="/projects/:projectId" element={<ProjectPage />} />
           <Route
@@ -261,8 +288,81 @@ function ProjectCard({ project }: { project: Project }) {
 
 function ExplorerPage() {
   const [query, setQuery] = useState("");
-  const seriesQuery = useQuery({ queryKey: ["explorer"], queryFn: listExplorerSeries });
-  const series = (seriesQuery.data ?? []).filter((item) =>
+  const [selectedSourceId, setSelectedSourceId] = useState<string>("");
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const normalizedQuery = query.trim();
+
+  const catalogQuery = useQuery({ queryKey: ["source-catalog"], queryFn: listSourceCatalog });
+  const sources = catalogQuery.data ?? [];
+
+  useEffect(() => {
+    if (!selectedSourceId && sources.length > 0) {
+      setSelectedSourceId(sources[0].metadata.sourceId);
+    }
+  }, [selectedSourceId, sources]);
+
+  const titlesQuery = useInfiniteQuery({
+    queryKey: ["source-titles", selectedSourceId, normalizedQuery],
+    enabled: Boolean(selectedSourceId),
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) => {
+      const page = Number(pageParam);
+      return normalizedQuery
+        ? searchSourceTitles(selectedSourceId, normalizedQuery, page)
+        : browseSourceTitles(selectedSourceId, page);
+    },
+    getNextPageParam: (lastPage) => (lastPage.hasNextPage ? lastPage.page + 1 : undefined),
+    staleTime: 60_000,
+  });
+
+  const titles = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: SourceTitleSummary[] = [];
+
+    for (const item of titlesQuery.data?.pages.flatMap((page) => page.items) ?? []) {
+      const key = `${selectedSourceId}:${item.titleId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(item);
+    }
+
+    return rows;
+  }, [selectedSourceId, titlesQuery.data]);
+
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && titlesQuery.hasNextPage && !titlesQuery.isFetchingNextPage) {
+          void titlesQuery.fetchNextPage();
+        }
+      },
+      { rootMargin: "700px 0px" },
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [titlesQuery.hasNextPage, titlesQuery.isFetchingNextPage, titlesQuery.fetchNextPage]);
+
+  const activeSource = sources.find((source) => source.metadata.sourceId === selectedSourceId);
+  const isInitialLoading =
+    catalogQuery.isLoading || (Boolean(selectedSourceId) && titlesQuery.isLoading);
+  const hasError = catalogQuery.isError || titlesQuery.isError;
+  const errorMessage =
+    catalogQuery.error instanceof Error
+      ? catalogQuery.error.message
+      : titlesQuery.error instanceof Error
+        ? titlesQuery.error.message
+        : "Explorer source failed";
+
+  const legacySeriesQuery = useQuery({
+    queryKey: ["explorer-legacy"],
+    queryFn: listExplorerSeries,
+    enabled: !window.florisApi && !catalogQuery.isLoading && sources.length === 0,
+  });
+  const legacySeries = (legacySeriesQuery.data ?? []).filter((item) =>
     `${item.title} ${item.originalTitle}`.toLowerCase().includes(query.toLowerCase()),
   );
 
@@ -280,52 +380,185 @@ function ExplorerPage() {
       </header>
 
       <div className="source-strip">
-        <button className="source-tab active">All sources</button>
-        <button className="source-tab">Korean Archive</button>
-        <button className="source-tab">Webtoon Index</button>
-        <button className="source-tab">Local import</button>
-      </div>
-
-      {seriesQuery.isLoading ? <LoadingPanel label="Loading explorer" /> : null}
-      {!seriesQuery.isLoading && series.length === 0 ? <EmptyPanel label="No series found" /> : null}
-
-      <div className="explorer-grid">
-        {series.map((item) => (
-          <Link className="series-card" key={item.externalSeriesId} to={`/explorer/${item.externalSeriesId}`}>
-            <CoverArt tone={item.coverTone} title={item.title} />
-            <div>
-              <div className="series-card-head">
-                <h2>{item.title}</h2>
-                {item.inLibrary ? <span className="status-chip active">In library</span> : null}
-              </div>
-              <p>{item.originalTitle}</p>
-              <div className="tag-row">
-                {item.genres.map((genre) => (
-                  <span key={genre}>{genre}</span>
-                ))}
-              </div>
-              <div className="series-foot">
-                <span>{item.sourceName}</span>
-                <strong>{item.latestChapter}</strong>
-              </div>
-            </div>
-          </Link>
+        {sources.map((source) => (
+          <button
+            className={source.metadata.sourceId === selectedSourceId ? "source-tab active" : "source-tab"}
+            key={source.metadata.sourceId}
+            onClick={() => setSelectedSourceId(source.metadata.sourceId)}
+          >
+            {source.metadata.displayName}
+          </button>
         ))}
+        {sources.length === 0 && !catalogQuery.isLoading ? (
+          <button className="source-tab active">Mock sources</button>
+        ) : null}
       </div>
+
+      {activeSource ? (
+        <div className="explorer-status-line">
+          <span>{activeSource.metadata.displayName}</span>
+          <strong>{titles.length} loaded</strong>
+          {titlesQuery.hasNextPage ? <em>Lazy loading enabled</em> : <em>End of source results</em>}
+        </div>
+      ) : null}
+
+      {isInitialLoading ? <LoadingPanel label="Loading explorer" /> : null}
+      {hasError ? <EmptyPanel label={errorMessage} /> : null}
+      {!isInitialLoading && !hasError && sources.length > 0 && titles.length === 0 ? (
+        <EmptyPanel label="No series found" />
+      ) : null}
+
+      {sources.length > 0 ? (
+        <>
+          <div className="explorer-grid">
+            {titles.map((item) => (
+              <SourceSeriesCard key={`${selectedSourceId}:${item.titleId}`} item={item} sourceId={selectedSourceId} />
+            ))}
+          </div>
+          <div ref={sentinelRef} className="lazy-load-sentinel">
+            {titlesQuery.isFetchingNextPage ? (
+              <>
+                <RefreshCw className="spin" size={16} />
+                <span>Loading more series</span>
+              </>
+            ) : titlesQuery.hasNextPage ? (
+              <span>Scroll for more</span>
+            ) : titles.length > 0 ? (
+              <span>No more results</span>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+
+      {sources.length === 0 && legacySeries.length > 0 ? (
+        <div className="explorer-grid">
+          {legacySeries.map((item) => (
+            <Link className="series-card" key={item.externalSeriesId} to={`/explorer/${item.externalSeriesId}`}>
+              <CoverArt tone={item.coverTone} title={item.title} />
+              <div>
+                <div className="series-card-head">
+                  <h2>{item.title}</h2>
+                  {item.inLibrary ? <span className="status-chip active">In library</span> : null}
+                </div>
+                <p>{item.originalTitle}</p>
+                <div className="tag-row">
+                  {item.genres.map((genre) => (
+                    <span key={genre}>{genre}</span>
+                  ))}
+                </div>
+                <div className="series-foot">
+                  <span>{item.sourceName}</span>
+                  <strong>{item.latestChapter}</strong>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
 
+function SourceSeriesCard({ item, sourceId }: { item: SourceTitleSummary; sourceId: string }) {
+  return (
+    <Link
+      className="series-card"
+      to={`/explorer/${encodeURIComponent(sourceId)}/${encodeURIComponent(item.titleId)}`}
+    >
+      <SourceCover imageUrl={item.coverUrl} title={item.name} />
+      <div>
+        <div className="series-card-head">
+          <h2>{item.name}</h2>
+          <span className={`status-chip ${statusClass(item.status)}`}>{item.statusLabel ?? item.status}</span>
+        </div>
+        <p className="source-card-description">{item.descriptionSnippet ?? item.canonicalUrl}</p>
+        <div className="tag-row">
+          {item.tags.slice(0, 4).map((genre) => (
+            <span key={genre}>{genre}</span>
+          ))}
+        </div>
+        <div className="series-foot">
+          <span>{sourceId}</span>
+          <strong>{item.latestChapterLabel ?? "Details"}</strong>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
 function ExplorerDetailsPage() {
-  const { externalSeriesId } = useParams();
+  const { sourceId, titleId, externalSeriesId } = useParams();
   const navigate = useNavigate();
-  const detailsQuery = useQuery({
+  const sourceDetailsQuery = useQuery({
+    queryKey: ["source-title-details", sourceId, titleId],
+    queryFn: () => getSourceTitleDetails(sourceId ?? "", titleId ?? ""),
+    enabled: Boolean(sourceId && titleId),
+  });
+  const legacyDetailsQuery = useQuery({
     queryKey: ["explorer-details", externalSeriesId],
     queryFn: () => getExplorerSeriesDetails(externalSeriesId ?? ""),
+    enabled: !sourceId && Boolean(externalSeriesId),
   });
 
-  const details = detailsQuery.data;
-  if (detailsQuery.isLoading) return <LoadingPanel label="Loading series" />;
+  if (sourceId && titleId) {
+    const sourceResult = sourceDetailsQuery.data;
+    if (sourceDetailsQuery.isLoading) return <LoadingPanel label="Loading series" />;
+    if (sourceDetailsQuery.isError) {
+      const message =
+        sourceDetailsQuery.error instanceof Error ? sourceDetailsQuery.error.message : "Series not found";
+      return <EmptyPanel label={message} />;
+    }
+    if (!sourceResult) return <EmptyPanel label="Series not found" />;
+
+    return (
+      <section className="page">
+        <button className="inline-back" onClick={() => navigate("/explorer")}>
+          <ArrowLeft size={16} />
+          Back to Explorer
+        </button>
+
+        <div className="details-layout">
+          <SourceCover imageUrl={sourceResult.details.coverUrl} title={sourceResult.details.name} />
+          <div className="details-main">
+            <p className="eyebrow">{sourceResult.details.sourceLabel ?? sourceId}</p>
+            <h1>{sourceResult.details.name}</h1>
+            <p className="muted">{sourceResult.details.originalLanguage ?? "Unknown original type"}</p>
+            <p className="description">{sourceResult.details.description ?? "No description available."}</p>
+            <div className="tag-row">
+              {sourceResult.details.tags.map((genre) => (
+                <span key={genre}>{genre}</span>
+              ))}
+            </div>
+            <div className="details-actions">
+              <button className="button primary">
+                <Plus size={16} />
+                Add to Library
+              </button>
+              <a className="button secondary" href={sourceResult.details.canonicalUrl} target="_blank" rel="noreferrer">
+                <Compass size={16} />
+                Open source
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div className="table-card">
+          <div className="table-title">
+            <h2>Chapters</h2>
+            <span>{sourceResult.chapters.length} listed</span>
+          </div>
+          <div className="chapter-list compact source-chapters">
+            {sourceResult.chapters.map((chapter) => (
+              <SourceChapterRow chapter={chapter} key={chapter.chapterId} />
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const details = legacyDetailsQuery.data;
+  if (legacyDetailsQuery.isLoading) return <LoadingPanel label="Loading series" />;
   if (!details) return <EmptyPanel label="Series not found" />;
 
   return (
@@ -381,6 +614,21 @@ function ExplorerDetailsPage() {
         </div>
       </div>
     </section>
+  );
+}
+
+function SourceChapterRow({ chapter }: { chapter: SourceChapterSummary }) {
+  return (
+    <div className="chapter-row">
+      <strong>{chapter.chapterNumber == null ? "Chapter" : `Chapter ${chapter.chapterNumber}`}</strong>
+      <span>{chapter.title || "Untitled"}</span>
+      <span className={`status-chip ${statusClass(chapter.availability)}`}>
+        {chapter.availabilityLabel ?? chapter.availability}
+      </span>
+      <button className="icon-button" title="Prepare chapter" disabled={chapter.availability !== "readable"}>
+        <Download size={16} />
+      </button>
+    </div>
   );
 }
 

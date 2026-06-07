@@ -260,6 +260,11 @@ h3 {
   flex: 0 0 auto;
 }
 
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .stats-strip {
   display: grid;
   grid-template-columns: 1.5fr 1fr 0.8fr 0.9fr 0.9fr;
@@ -380,6 +385,28 @@ h3 {
   background: linear-gradient(145deg, #151a1f, #4a5a64 58%, #b7c1bf);
 }
 
+.source-cover {
+  width: 108px;
+  height: 146px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: #161d22;
+}
+
+.source-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.details-layout .source-cover,
+.project-hero .source-cover {
+  width: 138px;
+  height: 188px;
+}
+
 .project-card-body {
   min-width: 0;
 }
@@ -427,6 +454,23 @@ h3 {
 
 .status-chip.not-started,
 .status-chip.not-reviewed {
+  border-color: rgba(153, 163, 170, 0.32);
+  color: #aeb6bb;
+}
+
+.status-chip.locked {
+  border-color: rgba(209, 100, 100, 0.35);
+  color: #dfa1a1;
+}
+
+.status-chip.readable,
+.status-chip.ongoing {
+  border-color: rgba(58, 163, 159, 0.38);
+  color: #78cbc7;
+}
+
+.status-chip.unavailable,
+.status-chip.unknown {
   border-color: rgba(153, 163, 170, 0.32);
   color: #aeb6bb;
 }
@@ -518,6 +562,24 @@ h3 {
   color: #f0c66d;
 }
 
+.explorer-status-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: -4px 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.explorer-status-line strong {
+  color: var(--text);
+}
+
+.explorer-status-line em {
+  color: var(--accent-2);
+  font-style: normal;
+}
+
 .tag-row span,
 .category-row span {
   display: inline-flex;
@@ -535,6 +597,14 @@ h3 {
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+}
+
+.source-card-description {
+  display: -webkit-box;
+  min-height: 40px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .series-foot {
@@ -614,6 +684,10 @@ h3 {
 
 .chapter-list.compact .chapter-row {
   grid-template-columns: 110px 1fr 120px 38px;
+}
+
+.source-chapters .chapter-row {
+  grid-template-columns: 126px minmax(0, 1fr) 120px 38px;
 }
 
 .chapter-row strong {
@@ -1017,6 +1091,16 @@ h3 {
   align-content: center;
   gap: 10px;
   color: var(--muted);
+}
+
+.lazy-load-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 68px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .spin {

@@ -26,8 +26,10 @@ function createWindow() {
   mainWindow.removeMenu();
 
   if (isDev) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-    mainWindow.webContents.openDevTools({ mode: "detach" });
+    mainWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}/#/explorer`);
+    if (process.env.FLORIS_OPEN_DEVTOOLS === "1") {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
   } else {
     mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   }

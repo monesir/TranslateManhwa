@@ -170,6 +170,27 @@ window.florisApi.getSourceTitleDetails(sourceId, titleId)
 window.florisApi.getSourceChapterPages(sourceId, titleId, chapterId)
 ```
 
+## Lazy Loading في الواجهة
+
+واجهة الإكسبلور يجب ألا تتعامل مع `browse/search` كدفعة واحدة ثابتة. كل مصدر يعيد صفحة نتائج، والواجهة تجمع الصفحات تدريجيًا:
+
+```text
+page 1 -> render immediately
+scroll near bottom -> page 2
+scroll near bottom -> page 3
+...
+```
+
+التطبيق الحالي يستخدم `useInfiniteQuery` في الواجهة، و`IntersectionObserver` عند نهاية شبكة الأعمال. هذا يعني:
+
+- أول تحميل يعرض أول 20 عملًا بسرعة.
+- عند اقتراب المستخدم من نهاية الشبكة يتم جلب الصفحة التالية تلقائيًا.
+- لا يوجد زر يدوي لكل صفحة.
+- لا تُطلب كل النتائج دفعة واحدة.
+- البحث يستخدم نفس الآلية لكن بمفتاح query مستقل.
+
+يجب الحفاظ على هذا السلوك عند إعادة تصميم الواجهة؛ التصميم يمكن أن يتغير، لكن العقد يجب أن يبقى paged/lazy وليس قائمة ثابتة.
+
 ## حدود طبقة الإكسبلور
 
 طبقة الإكسبلور تفعل:
