@@ -6,6 +6,11 @@ import type {
   LibraryStats,
   Project,
   ProjectOverview,
+  SourceCatalogItem,
+  SourceChapterPage,
+  SourcePagedResult,
+  SourceTitleDetailsResult,
+  SourceTitleSummary,
   TextUnit,
 } from "./domain";
 
@@ -31,6 +36,22 @@ interface FlorisApi {
     projectId: string,
     input: Omit<GlossaryTerm, "id" | "projectId">,
   ): Promise<GlossaryTerm>;
+  listSourceCatalog(): Promise<SourceCatalogItem[]>;
+  browseSourceTitles(
+    sourceId: string,
+    page?: number,
+  ): Promise<SourcePagedResult<SourceTitleSummary>>;
+  searchSourceTitles(
+    sourceId: string,
+    query: string,
+    page?: number,
+  ): Promise<SourcePagedResult<SourceTitleSummary>>;
+  getSourceTitleDetails(sourceId: string, titleId: string): Promise<SourceTitleDetailsResult>;
+  getSourceChapterPages(
+    sourceId: string,
+    titleId: string,
+    chapterId: string,
+  ): Promise<SourceChapterPage[]>;
 }
 
 declare global {

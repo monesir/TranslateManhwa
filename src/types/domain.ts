@@ -96,6 +96,92 @@ export interface ExplorerSeriesDetails extends ExplorerSeries {
   chapters: ExplorerChapter[];
 }
 
+export type SourceCapability =
+  | "browse"
+  | "search"
+  | "title_details"
+  | "chapter_list"
+  | "chapter_pages"
+  | "downloads";
+
+export type SourceCapabilityMap = Record<SourceCapability, boolean>;
+
+export type SourceTitleStatus = "ongoing" | "completed" | "hiatus" | "cancelled" | "unknown";
+
+export type SourceChapterAvailability = "readable" | "locked" | "unavailable";
+
+export interface SourceMetadata {
+  pluginId: string;
+  sourceId: string;
+  displayName: string;
+  language: string;
+  baseUrl: string;
+}
+
+export interface SourceActions {
+  canBrowse: boolean;
+  canSearch: boolean;
+  canViewTitle: boolean;
+  canReadChapters: boolean;
+  canDownload: boolean;
+}
+
+export interface SourceCatalogItem {
+  metadata: SourceMetadata;
+  capabilities: SourceCapabilityMap;
+  actions: SourceActions;
+}
+
+export interface SourceTitleSummary {
+  titleId: string;
+  slug: string;
+  name: string;
+  coverUrl: string | null;
+  bannerUrl: string | null;
+  canonicalUrl: string;
+  status: SourceTitleStatus;
+  statusLabel: string | null;
+  tags: string[];
+  latestChapterLabel: string | null;
+  descriptionSnippet: string | null;
+}
+
+export interface SourceTitleDetails extends SourceTitleSummary {
+  description: string | null;
+  authors: string[];
+  artists: string[];
+  originalLanguage: string | null;
+  sourceLabel: string | null;
+}
+
+export interface SourceChapterSummary {
+  chapterId: string;
+  title: string;
+  chapterNumber: number | null;
+  volumeNumber: number | null;
+  groupName: string | null;
+  releaseDate: string | null;
+  canonicalUrl: string;
+  availability: SourceChapterAvailability;
+  availabilityLabel: string | null;
+}
+
+export interface SourceChapterPage {
+  pageIndex: number;
+  imageUrl: string;
+}
+
+export interface SourcePagedResult<T> {
+  items: T[];
+  page: number;
+  hasNextPage: boolean;
+}
+
+export interface SourceTitleDetailsResult {
+  details: SourceTitleDetails;
+  chapters: SourceChapterSummary[];
+}
+
 export interface ProjectOverview extends Project {
   chaptersCount: number;
   charactersCount: number;

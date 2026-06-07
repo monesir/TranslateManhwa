@@ -4,6 +4,13 @@ const { DictionaryRepository } = require("../data/repositories/dictionary-reposi
 const {
   TranslationWorkspaceRepository,
 } = require("../data/repositories/translation-workspace-repository.cjs");
+const {
+  browseSourceTitles,
+  getSourceChapterPages,
+  getSourceTitleDetails,
+  listSourceCatalog,
+  searchSourceTitles,
+} = require("../sources/source-registry.cjs");
 
 function createAppApi(db) {
   const projectRepository = new ProjectRepository(db);
@@ -54,6 +61,26 @@ function createAppApi(db) {
 
     addGlossaryTerm(projectId, input) {
       return dictionaryRepository.addGlossaryTerm(projectId, input);
+    },
+
+    listSourceCatalog() {
+      return listSourceCatalog();
+    },
+
+    browseSourceTitles(sourceId, page) {
+      return browseSourceTitles(sourceId, page);
+    },
+
+    searchSourceTitles(sourceId, query, page) {
+      return searchSourceTitles(sourceId, query, page);
+    },
+
+    getSourceTitleDetails(sourceId, titleId) {
+      return getSourceTitleDetails(sourceId, titleId);
+    },
+
+    getSourceChapterPages(sourceId, titleId, chapterId) {
+      return getSourceChapterPages(sourceId, titleId, chapterId);
     },
   };
 }

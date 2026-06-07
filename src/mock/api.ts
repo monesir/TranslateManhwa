@@ -7,6 +7,11 @@ import type {
   LibraryStats,
   Project,
   ProjectOverview,
+  SourceCatalogItem,
+  SourceChapterPage,
+  SourcePagedResult,
+  SourceTitleDetailsResult,
+  SourceTitleSummary,
   TextUnit,
 } from "../types/domain";
 import {
@@ -50,6 +55,45 @@ export async function getExplorerSeriesDetails(
   externalSeriesId: string,
 ): Promise<ExplorerSeriesDetails | undefined> {
   return delay(explorerSeries.find((series) => series.externalSeriesId === externalSeriesId));
+}
+
+export async function listSourceCatalog(): Promise<SourceCatalogItem[]> {
+  if (window.florisApi) return window.florisApi.listSourceCatalog();
+  return delay([]);
+}
+
+export async function browseSourceTitles(
+  sourceId: string,
+  page = 1,
+): Promise<SourcePagedResult<SourceTitleSummary>> {
+  if (window.florisApi) return window.florisApi.browseSourceTitles(sourceId, page);
+  return delay({ items: [], page, hasNextPage: false });
+}
+
+export async function searchSourceTitles(
+  sourceId: string,
+  query: string,
+  page = 1,
+): Promise<SourcePagedResult<SourceTitleSummary>> {
+  if (window.florisApi) return window.florisApi.searchSourceTitles(sourceId, query, page);
+  return delay({ items: [], page, hasNextPage: false });
+}
+
+export async function getSourceTitleDetails(
+  sourceId: string,
+  titleId: string,
+): Promise<SourceTitleDetailsResult | undefined> {
+  if (window.florisApi) return window.florisApi.getSourceTitleDetails(sourceId, titleId);
+  return delay(undefined);
+}
+
+export async function getSourceChapterPages(
+  sourceId: string,
+  titleId: string,
+  chapterId: string,
+): Promise<SourceChapterPage[]> {
+  if (window.florisApi) return window.florisApi.getSourceChapterPages(sourceId, titleId, chapterId);
+  return delay([]);
 }
 
 export async function getProjectOverview(projectId: string): Promise<ProjectOverview | undefined> {

@@ -23,4 +23,9 @@ contextBridge.exposeInMainWorld("florisApi", {
   addCharacterAlias: invoke("data:addCharacterAlias"),
   addGlossaryCategory: invoke("data:addGlossaryCategory"),
   addGlossaryTerm: invoke("data:addGlossaryTerm"),
+  listSourceCatalog: invoke("sources:listCatalog"),
+  browseSourceTitles: invoke("sources:browse"),
+  searchSourceTitles: invoke("sources:search"),
+  getSourceTitleDetails: invoke("sources:getTitleDetails"),
+  getSourceChapterPages: invoke("sources:getChapterPages"),
 });

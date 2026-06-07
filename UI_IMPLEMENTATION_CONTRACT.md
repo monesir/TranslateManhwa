@@ -504,6 +504,11 @@ addCharacter(projectId, input)
 addCharacterAlias(characterId, input)
 addGlossaryTerm(projectId, input)
 addGlossaryCategory(projectId, name)
+listSourceCatalog()
+browseSourceTitles(sourceId, page)
+searchSourceTitles(sourceId, query, page)
+getSourceTitleDetails(sourceId, titleId)
+getSourceChapterPages(sourceId, titleId, chapterId)
 ```
 
 كلها mock async functions.
@@ -562,15 +567,31 @@ src/stores/translation-workspace-store.ts
 - Translation Page تعرض 3 أعمدة واضحة.
 - اختيار text unit يبرز region في الصورة.
 - اختيار region يبرز text unit.
-- final translation قابلة للتعديل في mock state.
+- final translation قابلة للتعديل عبر API الحالي أو fallback mock state.
 - Mini dictionary يتغير حسب selected text unit.
-- لا يوجد backend حقيقي.
-- لا يوجد SQL.
+- Explorer يستخدم backend مصادر حقيقي عند التشغيل داخل Electron.
+- قاعدة البيانات موجودة خلف Application API، ولا تكتب الواجهة SQL مباشرة.
 - لا يوجد OCR حقيقي.
 - لا يوجد AI API حقيقي.
 
 ## ملاحظة نهائية للمنفذ
 
-لا تخترع architecture جديدة. ابن الواجهة فوق mock API مطابق لهذا العقد.
+لا تخترع architecture جديدة. ابن الواجهة فوق `src/mock/api.ts` ودوال `window.florisApi` المتاحة عبر preload.
 
-الهدف أن نستبدل mock API لاحقًا بـ Application Layer حقيقي دون إعادة كتابة الصفحات.
+الهدف أن تبقى الصفحات مستقلة عن تفاصيل Electron وSQLite والمصادر الخارجية. بعض المسارات أصبحت تملك backend حقيقيًا، وما بقي من mock يجب أن يحافظ على نفس العقد حتى نستبدله تدريجيًا.
+
+## Explorer Backend Update
+
+طبقة الإكسبلور لم تعد mock بالكامل. توجد الآن دوال مصادر حقيقية عبر Electron:
+
+```text
+window.florisApi.listSourceCatalog()
+window.florisApi.browseSourceTitles(sourceId, page)
+window.florisApi.searchSourceTitles(sourceId, query, page)
+window.florisApi.getSourceTitleDetails(sourceId, titleId)
+window.florisApi.getSourceChapterPages(sourceId, titleId, chapterId)
+```
+
+يجب على واجهة الإكسبلور استخدام هذه الدوال بدل الاعتماد على `listExplorerSeries()` القديمة عندما تعمل داخل Electron. المصادر المبدئية هي `azora.series` و`mangaswat.series`.
+
+ملاحظة مهمة: `canReadChapters` يعني أن المصدر يستطيع إرجاع الفصول وروابط الصفحات. أما `canDownload` فهو `false` حاليًا إلى أن ننفذ workflow تحميل/استيراد الفصل إلى قاعدة بيانات المشروع.

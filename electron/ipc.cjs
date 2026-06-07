@@ -18,6 +18,14 @@ function registerIpcHandlers(appApi) {
       appApi.addGlossaryCategory(projectId, name),
     "data:addGlossaryTerm": (_event, projectId, input) =>
       appApi.addGlossaryTerm(projectId, input),
+    "sources:listCatalog": () => appApi.listSourceCatalog(),
+    "sources:browse": (_event, sourceId, page) => appApi.browseSourceTitles(sourceId, page),
+    "sources:search": (_event, sourceId, query, page) =>
+      appApi.searchSourceTitles(sourceId, query, page),
+    "sources:getTitleDetails": (_event, sourceId, titleId) =>
+      appApi.getSourceTitleDetails(sourceId, titleId),
+    "sources:getChapterPages": (_event, sourceId, titleId, chapterId) =>
+      appApi.getSourceChapterPages(sourceId, titleId, chapterId),
   };
 
   for (const [channel, handler] of Object.entries(handlers)) {
