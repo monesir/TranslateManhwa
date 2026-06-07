@@ -324,6 +324,74 @@ h3 {
   gap: 14px;
 }
 
+.explorer-grid {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 20px;
+  align-items: start;
+  padding: 4px 0 24px;
+}
+
+.floirs-cover-card {
+  position: relative;
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #000000;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+}
+
+.floirs-cover-card__media {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 2 / 3;
+  background: #1a1a1a;
+}
+
+.floirs-cover-card__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 220ms ease;
+}
+
+.floirs-cover-card:hover .floirs-cover-card__image {
+  transform: scale(1.04);
+}
+
+.floirs-cover-card__fallback {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  background: #222;
+  color: #e5e5e5;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.floirs-cover-card__overlay {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 3rem 0.75rem 0.75rem;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.6), transparent);
+  pointer-events: none;
+}
+
+.floirs-cover-card__title {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #f0f0f0;
+  filter: drop-shadow(0 4px 3px rgba(0, 0, 0, 0.07)) drop-shadow(0 2px 2px rgba(0, 0, 0, 0.06));
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.375;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .project-card,
 .series-card {
   display: grid;

@@ -98,6 +98,15 @@ function sourceTone(value: string) {
   return tones[total % tones.length];
 }
 
+function coverFallbackText(title: string) {
+  return title
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0] ?? "")
+    .join("")
+    .toUpperCase();
+}
+
 function SourceCover({ imageUrl, title }: { imageUrl: string | null; title: string }) {
   const [failed, setFailed] = useState(false);
 
@@ -109,6 +118,24 @@ function SourceCover({ imageUrl, title }: { imageUrl: string | null; title: stri
     <div className="source-cover">
       <img loading="lazy" src={imageUrl} alt={`${title} cover`} onError={() => setFailed(true)} />
     </div>
+  );
+}
+
+function FloirsCoverImage({ imageUrl, title }: { imageUrl: string | null; title: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (!imageUrl || failed) {
+    return <div className="floirs-cover-card__fallback">{coverFallbackText(title) || "No cover"}</div>;
+  }
+
+  return (
+    <img
+      className="floirs-cover-card__image"
+      loading="lazy"
+      src={imageUrl}
+      alt={title}
+      onError={() => setFailed(true)}
+    />
   );
 }
 
@@ -433,22 +460,17 @@ function ExplorerPage() {
       {sources.length === 0 && legacySeries.length > 0 ? (
         <div className="explorer-grid">
           {legacySeries.map((item) => (
-            <Link className="series-card" key={item.externalSeriesId} to={`/explorer/${item.externalSeriesId}`}>
-              <CoverArt tone={item.coverTone} title={item.title} />
-              <div>
-                <div className="series-card-head">
-                  <h2>{item.title}</h2>
-                  {item.inLibrary ? <span className="status-chip active">In library</span> : null}
-                </div>
-                <p>{item.originalTitle}</p>
-                <div className="tag-row">
-                  {item.genres.map((genre) => (
-                    <span key={genre}>{genre}</span>
-                  ))}
-                </div>
-                <div className="series-foot">
-                  <span>{item.sourceName}</span>
-                  <strong>{item.latestChapter}</strong>
+            <Link
+              className="floirs-cover-card floirs-cover-card--browse"
+              key={item.externalSeriesId}
+              to={`/explorer/${item.externalSeriesId}`}
+            >
+              <div className={`floirs-cover-card__media tone-${item.coverTone}`}>
+                <div className="floirs-cover-card__fallback">{coverFallbackText(item.title)}</div>
+                <div className="floirs-cover-card__overlay">
+                  <div className="floirs-cover-card__title" title={item.title}>
+                    {item.title}
+                  </div>
                 </div>
               </div>
             </Link>
@@ -462,24 +484,15 @@ function ExplorerPage() {
 function SourceSeriesCard({ item, sourceId }: { item: SourceTitleSummary; sourceId: string }) {
   return (
     <Link
-      className="series-card"
+      className="floirs-cover-card floirs-cover-card--browse"
       to={`/explorer/${encodeURIComponent(sourceId)}/${encodeURIComponent(item.titleId)}`}
     >
-      <SourceCover imageUrl={item.coverUrl} title={item.name} />
-      <div>
-        <div className="series-card-head">
-          <h2>{item.name}</h2>
-          <span className={`status-chip ${statusClass(item.status)}`}>{item.statusLabel ?? item.status}</span>
-        </div>
-        <p className="source-card-description">{item.descriptionSnippet ?? item.canonicalUrl}</p>
-        <div className="tag-row">
-          {item.tags.slice(0, 4).map((genre) => (
-            <span key={genre}>{genre}</span>
-          ))}
-        </div>
-        <div className="series-foot">
-          <span>{sourceId}</span>
-          <strong>{item.latestChapterLabel ?? "Details"}</strong>
+      <div className="floirs-cover-card__media">
+        <FloirsCoverImage imageUrl={item.coverUrl} title={item.name} />
+        <div className="floirs-cover-card__overlay">
+          <div className="floirs-cover-card__title" title={item.name}>
+            {item.name}
+          </div>
         </div>
       </div>
     </Link>
