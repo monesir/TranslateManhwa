@@ -760,9 +760,6 @@ function ExplorerDetailsPage() {
               <strong>{chapter.label}</strong>
               <span>{chapter.title ?? "Untitled"}</span>
               <span>{chapter.date}</span>
-              <button className="icon-button" title="Open reader">
-                <BookOpen size={16} />
-              </button>
             </div>
           ))}
         </div>
@@ -781,21 +778,28 @@ function SourceChapterRow({
   onPrepare: () => void;
 }) {
   return (
-    <div className="chapter-row">
+    <button
+      className="chapter-row chapter-row-button"
+      type="button"
+      disabled={chapter.availability !== "readable" || isPreparing}
+      onClick={onPrepare}
+    >
       <strong>{chapter.chapterNumber == null ? "Chapter" : `Chapter ${chapter.chapterNumber}`}</strong>
       <span>{chapter.title || "Untitled"}</span>
       <span className={`status-chip ${statusClass(chapter.availability)}`}>
         {chapter.availabilityLabel ?? chapter.availability}
       </span>
-      <button
-        className="icon-button"
-        title="Open reader"
-        disabled={chapter.availability !== "readable" || isPreparing}
-        onClick={onPrepare}
-      >
-        {isPreparing ? <RefreshCw className="spin" size={16} /> : <BookOpen size={16} />}
-      </button>
-    </div>
+      <span className="chapter-row-action">
+        {isPreparing ? (
+          <>
+            <RefreshCw className="spin" size={14} />
+            Loading
+          </>
+        ) : (
+          "Read"
+        )}
+      </span>
+    </button>
   );
 }
 
@@ -826,13 +830,13 @@ function ProjectPage() {
           </div>
         </div>
         {overview.lastWorkedChapterId ? (
-          <Link className="button primary hero-action" to={`/projects/${overview.id}/chapters/${overview.lastWorkedChapterId}/read`}>
-            <BookOpen size={16} />
-            Read last chapter
+          <Link className="button primary hero-action" to={`/projects/${overview.id}/chapters/${overview.lastWorkedChapterId}/translate`}>
+            <Edit3 size={16} />
+            Open last chapter
           </Link>
         ) : (
           <button className="button secondary hero-action" disabled>
-            <BookOpen size={16} />
+            <Edit3 size={16} />
             No prepared chapter
           </button>
         )}
@@ -915,7 +919,7 @@ function ChaptersTab({ projectId }: { projectId: string }) {
 
 function ChapterRow({ chapter }: { chapter: Chapter }) {
   return (
-    <div className="chapter-row">
+    <Link className="chapter-row chapter-row-link" to={`/projects/${chapter.projectId}/chapters/${chapter.id}/translate`}>
       <strong>{chapter.displayLabel}</strong>
       <span>{chapter.title ?? "Untitled"}</span>
       <span className={`status-chip ${statusClass(chapter.status)}`}>{chapter.status}</span>
@@ -926,10 +930,7 @@ function ChapterRow({ chapter }: { chapter: Chapter }) {
         <ProgressBar value={chapter.progress} />
         <small>{chapter.progress}%</small>
       </div>
-      <Link className="icon-button" to={`/projects/${chapter.projectId}/chapters/${chapter.id}/read`} title="Open reader">
-        <BookOpen size={16} />
-      </Link>
-    </div>
+    </Link>
   );
 }
 
