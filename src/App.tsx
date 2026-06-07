@@ -783,7 +783,7 @@ function SourceChapterRow({
 
 function ProjectPage() {
   const { projectId } = useParams();
-  const [tab, setTab] = useState<"overview" | "chapters" | "dictionary">("overview");
+  const [tab, setTab] = useState<"overview" | "chapters" | "dictionary">("chapters");
   const overviewQuery = useQuery({
     queryKey: ["project-overview", projectId],
     queryFn: () => getProjectOverview(projectId ?? ""),
@@ -807,34 +807,23 @@ function ProjectPage() {
             ))}
           </div>
         </div>
-        {overview.lastWorkedChapterId ? (
-          <Link className="button primary hero-action" to={`/projects/${overview.id}/chapters/${overview.lastWorkedChapterId}/translate`}>
-            <Edit3 size={16} />
-            Open last chapter
-          </Link>
-        ) : (
-          <button className="button secondary hero-action" disabled>
-            <Edit3 size={16} />
-            No prepared chapter
-          </button>
-        )}
       </header>
 
       <div className="tabs">
-        <button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>
-          Overview
-        </button>
         <button className={tab === "chapters" ? "active" : ""} onClick={() => setTab("chapters")}>
           Chapters
         </button>
         <button className={tab === "dictionary" ? "active" : ""} onClick={() => setTab("dictionary")}>
           Dictionary
         </button>
+        <button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>
+          Overview
+        </button>
       </div>
 
-      {tab === "overview" ? <OverviewTab overview={overview} /> : null}
       {tab === "chapters" ? <ChaptersTab projectId={overview.id} /> : null}
       {tab === "dictionary" ? <DictionaryTab projectId={overview.id} /> : null}
+      {tab === "overview" ? <OverviewTab overview={overview} /> : null}
     </section>
   );
 }

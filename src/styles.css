@@ -705,10 +705,17 @@ h3 {
   cursor: pointer;
 }
 
-.details-layout,
-.project-hero {
+.details-layout {
   display: grid;
   grid-template-columns: 138px minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 22px;
+}
+
+.project-hero {
+  display: grid;
+  grid-template-columns: 138px minmax(0, 1fr);
   gap: 18px;
   align-items: start;
   margin-bottom: 22px;
@@ -718,10 +725,6 @@ h3 {
 .project-hero .cover-art {
   width: 138px;
   min-height: 188px;
-}
-
-.hero-action {
-  align-self: start;
 }
 
 .table-card {
