@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, shell, session } = require("electron");
 const path = require("node:path");
 const { createAppApi } = require("./application/app-api.cjs");
 const { createDatabase } = require("./data/database.cjs");
@@ -6,6 +6,16 @@ const { registerIpcHandlers } = require("./ipc.cjs");
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 let databaseHandle;
+
+function installImageRequestHeaders() {
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ["*://*.2xstorage.com/*"] },
+    (details, callback) => {
+      details.requestHeaders.Referer = "https://www.mangabats.com/";
+      callback({ requestHeaders: details.requestHeaders });
+    },
+  );
+}
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -44,6 +54,7 @@ app.whenReady().then(() => {
   databaseHandle = createDatabase(app);
   const appApi = createAppApi(databaseHandle.db);
   registerIpcHandlers(appApi);
+  installImageRequestHeaders();
 
   createWindow();
 
