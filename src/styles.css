@@ -1158,6 +1158,103 @@ h3 {
   background: #050708;
 }
 
+.reader-screen {
+  display: grid;
+  grid-template-rows: 58px minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
+  background: #0c1013;
+}
+
+.reader-topbar {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #131a1f;
+}
+
+.reader-title {
+  min-width: 0;
+}
+
+.reader-title strong,
+.reader-title span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-title span,
+.reader-count {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.reader-count,
+.reader-zoom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reader-zoom span {
+  width: 48px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 13px;
+}
+
+.reader-project-link {
+  height: 38px;
+}
+
+.reader-stage {
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
+}
+
+.reader-page-stack {
+  display: grid;
+  justify-content: center;
+  gap: 18px;
+}
+
+.reader-page {
+  width: min(var(--reader-zoom, 100%), 1120px);
+  margin: 0;
+}
+
+.reader-page img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid #25313a;
+  border-radius: 6px;
+  background: #050708;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+}
+
+.reader-page figcaption {
+  margin-top: 6px;
+  color: var(--muted-2);
+  text-align: center;
+  font-size: 12px;
+}
+
+.reader-state-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 260px;
+  color: var(--muted);
+}
+
 .page-tone-night {
   background: linear-gradient(180deg, #1c252a, #0e1216 45%, #33291f);
 }

@@ -21,6 +21,7 @@ function mapProjectRow(row) {
     sourceLanguage: row.source_language,
     targetLanguage: row.target_language,
     coverTone: coverToneFromMetadata(row.cover_metadata_json),
+    coverUrl: row.cover_asset_path ?? null,
     status: row.status,
     lastWorkedChapterId: row.last_worked_chapter_id ?? undefined,
     lastWorkedChapterLabel: row.last_worked_chapter_label ?? undefined,

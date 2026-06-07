@@ -64,6 +64,7 @@ export interface Project {
   sourceLanguage: string;
   targetLanguage: string;
   coverTone: string;
+  coverUrl: string | null;
   status: ProjectStatus;
   lastWorkedChapterId?: string;
   lastWorkedChapterLabel?: string;

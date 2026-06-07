@@ -38,6 +38,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ReaderPage } from "./pages/ReaderPage";
 import {
   addCharacter,
   addGlossaryTerm,
@@ -211,6 +212,10 @@ function SourceCover({ imageUrl, title }: { imageUrl: string | null; title: stri
   );
 }
 
+function ProjectCover({ project }: { project: Project }) {
+  return <SourceCover imageUrl={project.coverUrl} title={project.title} />;
+}
+
 function FloirsCoverImage({ imageUrl, title }: { imageUrl: string | null; title: string }) {
   const [failed, setFailed] = useState(false);
 
@@ -257,7 +262,7 @@ function EmptyPanel({ label }: { label: string }) {
 
 function AppShell() {
   const runtimeLabel = window.florisApi ? "Electron runtime" : "Local UI build";
-  const dataLabel = window.florisApi ? "SQLite data" : "Mock data";
+  const dataLabel = window.florisApi ? "SQLite data" : "No SQLite connection";
 
   return (
     <div className="app-shell">
@@ -303,6 +308,7 @@ function AppShell() {
             path="/projects/:projectId/chapters/:chapterId/translate"
             element={<TranslationPage />}
           />
+          <Route path="/projects/:projectId/chapters/:chapterId/read" element={<ReaderPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>
@@ -380,7 +386,7 @@ function StatCard({ label, value, icon }: { label: string; value: string; icon: 
 function ProjectCard({ project }: { project: Project }) {
   return (
     <Link className="project-card" to={`/projects/${project.id}`}>
-      <CoverArt tone={project.coverTone} title={project.title} />
+      <ProjectCover project={project} />
       <div className="project-card-body">
         <div className="project-card-title">
           <div>
@@ -510,7 +516,7 @@ function ExplorerPage() {
           </button>
         ))}
         {sources.length === 0 && !catalogQuery.isLoading ? (
-          <button className="source-tab active">Mock sources</button>
+          <button className="source-tab active">No sources</button>
         ) : null}
       </div>
 
@@ -624,7 +630,7 @@ function ExplorerDetailsPage() {
       queryClient.invalidateQueries({ queryKey: ["project-overview", result.projectId] });
       queryClient.invalidateQueries({ queryKey: ["project-chapters", result.projectId] });
       queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
-      navigate(`/projects/${result.projectId}/chapters/${result.chapterId}/translate`);
+      navigate(`/projects/${result.projectId}/chapters/${result.chapterId}/read`);
     },
   });
 
@@ -739,12 +745,6 @@ function ExplorerDetailsPage() {
               <Plus size={16} />
               Add to Library
             </button>
-            {details.inLibrary ? (
-              <button className="button secondary" onClick={() => navigate("/projects/project_solo_leveling")}>
-                <LibraryIcon size={16} />
-                Open in Library
-              </button>
-            ) : null}
           </div>
         </div>
       </div>
@@ -760,8 +760,8 @@ function ExplorerDetailsPage() {
               <strong>{chapter.label}</strong>
               <span>{chapter.title ?? "Untitled"}</span>
               <span>{chapter.date}</span>
-              <button className="icon-button" title="Prepare chapter">
-                <Download size={16} />
+              <button className="icon-button" title="Open reader">
+                <BookOpen size={16} />
               </button>
             </div>
           ))}
@@ -789,11 +789,11 @@ function SourceChapterRow({
       </span>
       <button
         className="icon-button"
-        title="Prepare chapter"
+        title="Open reader"
         disabled={chapter.availability !== "readable" || isPreparing}
         onClick={onPrepare}
       >
-        {isPreparing ? <RefreshCw className="spin" size={16} /> : <Download size={16} />}
+        {isPreparing ? <RefreshCw className="spin" size={16} /> : <BookOpen size={16} />}
       </button>
     </div>
   );
@@ -814,7 +814,7 @@ function ProjectPage() {
   return (
     <section className="page">
       <header className="project-hero">
-        <CoverArt tone={overview.coverTone} title={overview.title} />
+        <SourceCover imageUrl={overview.coverUrl} title={overview.title} />
         <div>
           <p className="eyebrow">{overview.sourceLanguage} to {overview.targetLanguage}</p>
           <h1>{overview.title}</h1>
@@ -826,13 +826,13 @@ function ProjectPage() {
           </div>
         </div>
         {overview.lastWorkedChapterId ? (
-          <Link className="button primary hero-action" to={`/projects/${overview.id}/chapters/${overview.lastWorkedChapterId}/translate`}>
-            <Edit3 size={16} />
-            Open last chapter
+          <Link className="button primary hero-action" to={`/projects/${overview.id}/chapters/${overview.lastWorkedChapterId}/read`}>
+            <BookOpen size={16} />
+            Read last chapter
           </Link>
         ) : (
           <button className="button secondary hero-action" disabled>
-            <Edit3 size={16} />
+            <BookOpen size={16} />
             No prepared chapter
           </button>
         )}
@@ -926,8 +926,8 @@ function ChapterRow({ chapter }: { chapter: Chapter }) {
         <ProgressBar value={chapter.progress} />
         <small>{chapter.progress}%</small>
       </div>
-      <Link className="icon-button" to={`/projects/${chapter.projectId}/chapters/${chapter.id}/translate`} title="Open translation">
-        <Edit3 size={16} />
+      <Link className="icon-button" to={`/projects/${chapter.projectId}/chapters/${chapter.id}/read`} title="Open reader">
+        <BookOpen size={16} />
       </Link>
     </div>
   );

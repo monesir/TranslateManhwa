@@ -21,6 +21,7 @@ class TranslationWorkspaceRepository {
       SELECT
         p.*,
         lc.display_label AS last_worked_chapter_label,
+        cover.path AS cover_asset_path,
         cover.metadata_json AS cover_metadata_json,
         0 AS progress
       FROM projects p

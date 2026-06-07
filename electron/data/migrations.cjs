@@ -332,6 +332,44 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 3,
+    name: "remove_seed_mock_data",
+    up(db) {
+      db.exec(`
+        DELETE FROM pages
+        WHERE chapter_id IN (
+          SELECT id FROM chapters
+          WHERE project_id IN (
+            'project_solo_leveling',
+            'project_orv',
+            'project_tbate'
+          )
+        );
+
+        DELETE FROM assets
+        WHERE project_id IN (
+          'project_solo_leveling',
+          'project_orv',
+          'project_tbate'
+        );
+
+        DELETE FROM chapters
+        WHERE project_id IN (
+          'project_solo_leveling',
+          'project_orv',
+          'project_tbate'
+        );
+
+        DELETE FROM projects
+        WHERE id IN (
+          'project_solo_leveling',
+          'project_orv',
+          'project_tbate'
+        );
+      `);
+    },
+  },
 ];
 
 function ensureMigrationTable(db) {

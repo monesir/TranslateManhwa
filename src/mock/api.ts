@@ -126,11 +126,9 @@ export async function ensureSourceProject(
   titleId: string,
 ): Promise<SourceProjectImportResult> {
   if (window.florisApi) return window.florisApi.ensureSourceProject(sourceId, titleId);
-  return delay({
-    projectId: "project_solo_leveling",
-    created: false,
-    chaptersCount: chapters.filter((chapter) => chapter.projectId === "project_solo_leveling").length,
-  });
+  void sourceId;
+  void titleId;
+  throw new Error("Source import requires the Electron runtime");
 }
 
 export async function prepareSourceChapter(
@@ -139,13 +137,10 @@ export async function prepareSourceChapter(
   chapterId: string,
 ): Promise<SourceChapterPreparationResult> {
   if (window.florisApi) return window.florisApi.prepareSourceChapter(sourceId, titleId, chapterId);
-  const chapter = chapters.find((item) => item.id === "chapter_012") ?? chapters[0];
-  return delay({
-    projectId: chapter.projectId,
-    chapterId: chapter.id,
-    pagesCount: pages.filter((page) => page.chapterId === chapter.id).length,
-    chapter,
-  });
+  void sourceId;
+  void titleId;
+  void chapterId;
+  throw new Error("Chapter preparation requires the Electron runtime");
 }
 
 export async function getProjectOverview(projectId: string): Promise<ProjectOverview | undefined> {

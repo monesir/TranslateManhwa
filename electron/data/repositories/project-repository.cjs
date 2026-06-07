@@ -10,6 +10,7 @@ class ProjectRepository {
       SELECT
         p.*,
         lc.display_label AS last_worked_chapter_label,
+        cover.path AS cover_asset_path,
         cover.metadata_json AS cover_metadata_json,
         CASE
           WHEN COUNT(c.id) = 0 THEN 0
@@ -65,6 +66,7 @@ class ProjectRepository {
     const row = this.db.prepare(`
       SELECT
         p.*,
+        cover.path AS cover_asset_path,
         cover.metadata_json AS cover_metadata_json,
         lc.display_label AS last_worked_chapter_label,
         pm.genres_json,
