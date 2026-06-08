@@ -4,6 +4,7 @@ const path = require("node:path");
 const { commandExists, runProcess } = require("./process-utils.cjs");
 
 const PYTHON_BRIDGE = path.join(__dirname, "python_ocr_bridge.py");
+const PYTHON_CROP_SCRIPT = path.join(__dirname, "scripts", "crop-image.py");
 const CROP_IMAGE_SCRIPT = path.join(__dirname, "scripts", "crop-image.ps1");
 const WINDOWS_OCR_SCRIPT = path.join(__dirname, "scripts", "windows-ocr.ps1");
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -209,14 +210,62 @@ async function cropWithPowerShell(sourcePath, outputPath, cropRect) {
   }
 }
 
-async function cropPageForRegion(page, region) {
+async function cropWithPython(pythonCommand, sourcePath, outputPath, cropRect) {
+  const result = await runProcess(
+    pythonCommand,
+    [
+      PYTHON_CROP_SCRIPT,
+      "--source",
+      sourcePath,
+      "--output",
+      outputPath,
+      "--x",
+      String(cropRect.x),
+      "--y",
+      String(cropRect.y),
+      "--width",
+      String(cropRect.width),
+      "--height",
+      String(cropRect.height),
+    ],
+    { timeoutMs: 30_000 },
+  );
+
+  return {
+    error: result.stderr.trim() || result.stdout.trim() || "Python image crop failed.",
+    ok: result.ok,
+  };
+}
+
+async function cropPageForRegion(page, region, pythonCommand = process.env.FLORIS_PYTHON || "python") {
   const cropRect = normalizeCropRect(region, page);
   const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "floris-ocr-region-"));
   const outputPath = path.join(tempDirectory, "region.png");
 
-  const nativeCropOk = await cropWithNativeImage(page.imagePath, outputPath, cropRect);
-  if (!nativeCropOk) {
-    await cropWithPowerShell(page.imagePath, outputPath, cropRect);
+  try {
+    const nativeCropOk = await cropWithNativeImage(page.imagePath, outputPath, cropRect);
+    if (!nativeCropOk) {
+      let pythonCrop = { error: "", ok: false };
+      try {
+        pythonCrop = await cropWithPython(pythonCommand, page.imagePath, outputPath, cropRect);
+      } catch (error) {
+        pythonCrop = { error: error instanceof Error ? error.message : String(error), ok: false };
+      }
+
+      if (!pythonCrop.ok) {
+        try {
+          await cropWithPowerShell(page.imagePath, outputPath, cropRect);
+        } catch (error) {
+          const powerShellError = error instanceof Error ? error.message : String(error);
+          throw new Error(
+            `Image crop failed. Python: ${pythonCrop.error || "not available"}. PowerShell: ${powerShellError}`,
+          );
+        }
+      }
+    }
+  } catch (error) {
+    await fs.rm(tempDirectory, { recursive: true, force: true });
+    throw error;
   }
 
   return {
@@ -616,7 +665,7 @@ class OcrProviderRegistry {
   }
 
   async recognizeRegion(providerId, page, region, options = {}) {
-    const cropped = await cropPageForRegion(page, region);
+    const cropped = await cropPageForRegion(page, region, this.pythonCommand);
     try {
       const result = await this.recognizePage(providerId, cropped.page, options);
       return {
