@@ -153,7 +153,7 @@ function normalizeSearch(value: string) {
 }
 
 function isRenderableImageUrl(value: string | null | undefined) {
-  return Boolean(value && /^(https?:|file:|data:)/.test(value));
+  return Boolean(value && /^(https?:|file:|data:|floris-cache:)/.test(value));
 }
 
 function CoverArt({ tone, title }: { tone: string; title: string }) {

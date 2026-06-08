@@ -1,5 +1,6 @@
 const { ProjectRepository } = require("../data/repositories/project-repository.cjs");
 const { ChapterRepository } = require("../data/repositories/chapter-repository.cjs");
+const { CoverCache } = require("../data/cover-cache.cjs");
 const { DictionaryRepository } = require("../data/repositories/dictionary-repository.cjs");
 const {
   SourceImportRepository,
@@ -16,11 +17,12 @@ const {
   searchSourceTitles,
 } = require("../sources/source-registry.cjs");
 
-function createAppApi(db) {
+function createAppApi(db, options = {}) {
   const projectRepository = new ProjectRepository(db);
   const chapterRepository = new ChapterRepository(db);
   const dictionaryRepository = new DictionaryRepository(db);
-  const sourceImportRepository = new SourceImportRepository(db);
+  const coverCache = options.workspacePath ? new CoverCache(options.workspacePath) : null;
+  const sourceImportRepository = new SourceImportRepository(db, { coverCache });
   const translationWorkspaceRepository = new TranslationWorkspaceRepository(db);
 
   return {
@@ -115,6 +117,10 @@ function createAppApi(db) {
 
       const pages = await getSourceChapterPages(sourceId, titleId, chapterId);
       return sourceImportRepository.prepareChapter(sourceId, sourceResult, chapter, pages);
+    },
+
+    cacheLibraryCovers() {
+      return sourceImportRepository.cacheExistingLibraryCovers();
     },
 
     async prepareLibraryChapter(chapterId) {

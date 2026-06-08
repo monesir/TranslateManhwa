@@ -1,11 +1,24 @@
-const { app, BrowserWindow, shell, session } = require("electron");
+const { app, BrowserWindow, protocol, shell, session } = require("electron");
+const fs = require("node:fs");
 const path = require("node:path");
 const { createAppApi } = require("./application/app-api.cjs");
+const { COVER_CACHE_HOST, COVER_CACHE_SCHEME } = require("./data/cover-cache.cjs");
 const { createDatabase } = require("./data/database.cjs");
 const { registerIpcHandlers } = require("./ipc.cjs");
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 let databaseHandle;
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: COVER_CACHE_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+    },
+  },
+]);
 
 function installImageRequestHeaders() {
   session.defaultSession.webRequest.onBeforeSendHeaders(
@@ -17,13 +30,70 @@ function installImageRequestHeaders() {
   );
 }
 
+function imageContentType(filePath) {
+  switch (path.extname(filePath).toLowerCase()) {
+    case ".webp":
+      return "image/webp";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".png":
+      return "image/png";
+    case ".gif":
+      return "image/gif";
+    case ".avif":
+      return "image/avif";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function installCacheProtocol(workspacePath) {
+  const coversPath = path.resolve(workspacePath, "cache", "covers");
+  const coversRoot = coversPath.endsWith(path.sep) ? coversPath : `${coversPath}${path.sep}`;
+  const coversRootKey = coversRoot.toLowerCase();
+
+  protocol.handle(COVER_CACHE_SCHEME, async (request) => {
+    try {
+      const requestUrl = new URL(request.url);
+      if (requestUrl.hostname !== COVER_CACHE_HOST) {
+        return new Response("Not found", { status: 404 });
+      }
+
+      const fileName = decodeURIComponent(requestUrl.pathname.replace(/^\/+/, ""));
+      if (!fileName || fileName.includes("/") || fileName.includes("\\")) {
+        return new Response("Bad cache path", { status: 400 });
+      }
+
+      const filePath = path.resolve(coversPath, fileName);
+      if (!filePath.toLowerCase().startsWith(coversRootKey)) {
+        return new Response("Forbidden", { status: 403 });
+      }
+
+      if (!fs.existsSync(filePath)) {
+        return new Response("Not found", { status: 404 });
+      }
+
+      const bytes = await fs.promises.readFile(filePath);
+      return new Response(bytes, {
+        headers: {
+          "Content-Type": imageContentType(filePath),
+          "Cache-Control": "public, max-age=31536000, immutable",
+        },
+      });
+    } catch {
+      return new Response("Bad cache request", { status: 400 });
+    }
+  });
+}
+
 function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1440,
     height: 940,
     minWidth: 1180,
     minHeight: 760,
-    backgroundColor: "#0f1419",
+    backgroundColor: "#000000",
     title: "Floris Manhwa Translator",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -50,11 +120,19 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   databaseHandle = createDatabase(app);
-  const appApi = createAppApi(databaseHandle.db);
+  installCacheProtocol(databaseHandle.workspacePath);
+
+  const appApi = createAppApi(databaseHandle.db, { workspacePath: databaseHandle.workspacePath });
   registerIpcHandlers(appApi);
   installImageRequestHeaders();
+
+  try {
+    await appApi.cacheLibraryCovers();
+  } catch (error) {
+    console.warn("Library cover cache warmup failed", error);
+  }
 
   createWindow();
 

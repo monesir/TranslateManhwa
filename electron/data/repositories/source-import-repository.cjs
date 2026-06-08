@@ -1,5 +1,14 @@
 const { mapChapterRow } = require("./mappers.cjs");
 
+function parseJson(value, fallback) {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
 function slugify(value) {
   return String(value ?? "")
     .trim()
@@ -50,8 +59,9 @@ function sourceLanguage(details) {
 }
 
 class SourceImportRepository {
-  constructor(db) {
+  constructor(db, options = {}) {
     this.db = db;
+    this.coverCache = options.coverCache;
   }
 
   findProject(sourceId, titleId) {
@@ -89,13 +99,21 @@ class SourceImportRepository {
     };
   }
 
-  ensureProject(sourceId, sourceResult) {
+  async ensureProject(sourceId, sourceResult) {
     const timestamp = new Date().toISOString();
     const details = sourceResult.details;
     const existingProjectId = this.findProject(sourceId, details.titleId);
     const projectId = existingProjectId ?? sourceProjectId(sourceId, details.titleId);
     const slug = slugify(`${sourceId}-${details.titleId}`);
     const coverAssetId = details.coverUrl ? `asset_${projectId}_cover` : null;
+    const coverAsset = coverAssetId
+      ? await this.resolveCoverAsset({
+          assetId: coverAssetId,
+          projectId,
+          sourceUrl: details.coverUrl,
+          timestamp,
+        })
+      : null;
 
     this.db.exec("BEGIN");
     try {
@@ -122,20 +140,24 @@ class SourceImportRepository {
         timestamp,
       );
 
-      if (coverAssetId) {
+      if (coverAsset) {
         this.db.prepare(`
           INSERT INTO assets (
             id, project_id, kind, path, mime_type, width, height, size_bytes,
             checksum, metadata_json, created_at
-          ) VALUES (?, ?, 'cover', ?, NULL, NULL, NULL, NULL, NULL, ?, ?)
+          ) VALUES (?, ?, 'cover', ?, ?, NULL, NULL, ?, NULL, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             path = excluded.path,
+            mime_type = excluded.mime_type,
+            size_bytes = excluded.size_bytes,
             metadata_json = excluded.metadata_json
         `).run(
-          coverAssetId,
+          coverAsset.assetId,
           projectId,
-          details.coverUrl,
-          JSON.stringify({ tone: "steel", sourceImageUrl: details.coverUrl }),
+          coverAsset.path,
+          coverAsset.mimeType,
+          coverAsset.sizeBytes,
+          JSON.stringify(coverAsset.metadata),
           timestamp,
         );
       }
@@ -206,6 +228,113 @@ class SourceImportRepository {
     };
   }
 
+  async resolveCoverAsset({ assetId, projectId, sourceUrl, timestamp }) {
+    const metadata = {
+      tone: "steel",
+      sourceImageUrl: sourceUrl,
+      cache: {
+        status: "remote",
+        updatedAt: timestamp,
+      },
+    };
+
+    if (!this.coverCache || !sourceUrl) {
+      return {
+        assetId,
+        path: sourceUrl,
+        mimeType: null,
+        sizeBytes: null,
+        metadata,
+      };
+    }
+
+    try {
+      const cached = await this.coverCache.cacheCover({ assetId, projectId, sourceUrl });
+      return {
+        assetId,
+        path: cached.cacheUrl,
+        mimeType: cached.mimeType,
+        sizeBytes: cached.sizeBytes,
+        metadata: {
+          ...metadata,
+          cache: {
+            status: "cached",
+            updatedAt: timestamp,
+            relativePath: cached.relativePath,
+            sizeBytes: cached.sizeBytes,
+            mimeType: cached.mimeType,
+          },
+        },
+      };
+    } catch (error) {
+      return {
+        assetId,
+        path: sourceUrl,
+        mimeType: null,
+        sizeBytes: null,
+        metadata: {
+          ...metadata,
+          cache: {
+            status: "failed",
+            updatedAt: timestamp,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        },
+      };
+    }
+  }
+
+  async cacheExistingLibraryCovers() {
+    if (!this.coverCache) {
+      return { checked: 0, cached: 0, failed: 0 };
+    }
+
+    const rows = this.db.prepare(`
+      SELECT id, project_id, path, mime_type, size_bytes, metadata_json
+      FROM assets
+      WHERE kind = 'cover' AND path LIKE 'http%'
+      ORDER BY created_at ASC
+    `).all();
+    let cached = 0;
+    let failed = 0;
+
+    for (const row of rows) {
+      const timestamp = new Date().toISOString();
+      const metadata = parseJson(row.metadata_json, {});
+      const sourceUrl = metadata.sourceImageUrl || row.path;
+      const coverAsset = await this.resolveCoverAsset({
+        assetId: row.id,
+        projectId: row.project_id,
+        sourceUrl,
+        timestamp,
+      });
+
+      this.db.prepare(`
+        UPDATE assets
+        SET path = ?,
+            mime_type = ?,
+            size_bytes = ?,
+            metadata_json = ?
+        WHERE id = ?
+      `).run(
+        coverAsset.path,
+        coverAsset.mimeType,
+        coverAsset.sizeBytes,
+        JSON.stringify({
+          ...metadata,
+          ...coverAsset.metadata,
+          sourceImageUrl: sourceUrl,
+        }),
+        row.id,
+      );
+
+      if (coverAsset.metadata.cache?.status === "cached") cached += 1;
+      if (coverAsset.metadata.cache?.status === "failed") failed += 1;
+    }
+
+    return { checked: rows.length, cached, failed };
+  }
+
   ensureChapters(projectId, chapters, timestamp) {
     for (const { chapter, index } of sortChapters(chapters)) {
       const chapterId = sourceChapterId(projectId, chapter.chapterId);
@@ -232,12 +361,12 @@ class SourceImportRepository {
     }
   }
 
-  prepareChapter(sourceId, sourceResult, sourceChapter, pages) {
+  async prepareChapter(sourceId, sourceResult, sourceChapter, pages) {
     if (!Array.isArray(pages) || pages.length === 0) {
       throw new Error("No readable pages were returned for this chapter");
     }
 
-    const project = this.ensureProject(sourceId, sourceResult);
+    const project = await this.ensureProject(sourceId, sourceResult);
     const timestamp = new Date().toISOString();
     const chapterId = sourceChapterId(project.projectId, sourceChapter.chapterId);
 
