@@ -26,9 +26,9 @@ export type OcrProviderId =
   | "paddleocr"
   | "tesseract"
   | "easyocr"
-  | "manga-ocr"
-  | "azure-read"
-  | "google-vision";
+  | "rapidocr"
+  | "doctr"
+  | "manga-ocr";
 
 export type OcrSourceStatus =
   | "Empty"
@@ -320,7 +320,7 @@ export interface OcrProviderStatus {
   id: OcrProviderId;
   label: string;
   engine: string;
-  kind: "local" | "cloud";
+  kind: "local";
   supportsRegions: boolean;
   setup: string;
   available: boolean;

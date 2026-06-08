@@ -42,28 +42,28 @@ const OCR_PROVIDERS = [
     setup: "Install Python package: pip install easyocr",
   },
   {
+    id: "rapidocr",
+    label: "RapidOCR",
+    engine: "rapidocr-python",
+    kind: "local",
+    supportsRegions: true,
+    setup: "Install Python package: pip install rapidocr",
+  },
+  {
+    id: "doctr",
+    label: "docTR",
+    engine: "python-doctr",
+    kind: "local",
+    supportsRegions: true,
+    setup: 'Install Python package: pip install "python-doctr[torch]"',
+  },
+  {
     id: "manga-ocr",
     label: "Manga OCR",
     engine: "manga-ocr-python",
     kind: "local",
     supportsRegions: true,
     setup: "Install Python package: pip install manga-ocr",
-  },
-  {
-    id: "azure-read",
-    label: "Azure AI Vision Read",
-    engine: "azure-computer-vision-read",
-    kind: "cloud",
-    supportsRegions: true,
-    setup: "Set AZURE_AI_VISION_ENDPOINT and AZURE_AI_VISION_KEY environment variables.",
-  },
-  {
-    id: "google-vision",
-    label: "Google Cloud Vision",
-    engine: "google-cloud-vision-rest",
-    kind: "cloud",
-    supportsRegions: true,
-    setup: "Set GOOGLE_CLOUD_VISION_API_KEY environment variable.",
   },
 ];
 
@@ -103,24 +103,6 @@ function languageHintToTesseract(languageHint) {
     ko: "kor",
   };
   return map[key] ?? "eng";
-}
-
-function languageHintToAzure(languageHint) {
-  const key = String(languageHint ?? "").trim().toLowerCase();
-  const map = {
-    arabic: "ar",
-    ar: "ar",
-    chinese: "zh-Hans",
-    chinese_simplified: "zh-Hans",
-    chinese_traditional: "zh-Hant",
-    english: "en",
-    en: "en",
-    japanese: "ja",
-    ja: "ja",
-    korean: "ko",
-    ko: "ko",
-  };
-  return map[key] ?? "";
 }
 
 function normalizeRegion(region, pageWidth, pageHeight) {
@@ -448,70 +430,6 @@ function parseTesseractTsv(tsv, page) {
   });
 }
 
-function regionFromPolygonValues(values, page) {
-  const xs = [];
-  const ys = [];
-  for (let index = 0; index + 1 < values.length; index += 2) {
-    xs.push(Number(values[index]));
-    ys.push(Number(values[index + 1]));
-  }
-  if (xs.length === 0) {
-    return { type: "box", x: 0, y: 0, width: page.width, height: page.height };
-  }
-  const minX = Math.max(0, Math.min(...xs));
-  const minY = Math.max(0, Math.min(...ys));
-  const maxX = Math.max(minX + 1, Math.max(...xs));
-  const maxY = Math.max(minY + 1, Math.max(...ys));
-  return { type: "box", x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-}
-
-function parseAzureReadResult(payload, page) {
-  const items = [];
-  for (const readPage of payload?.analyzeResult?.readResults ?? []) {
-    for (const [index, line] of (readPage.lines ?? []).entries()) {
-      const wordConfidences = (line.words ?? [])
-        .map((word) => Number(word.confidence))
-        .filter((value) => Number.isFinite(value));
-      const confidence =
-        wordConfidences.length > 0
-          ? wordConfidences.reduce((sum, value) => sum + value, 0) / wordConfidences.length
-          : null;
-      items.push({
-        confidence,
-        pageId: page.pageId,
-        readingOrder: index + 1,
-        region: regionFromPolygonValues(line.boundingBox ?? [], page),
-        text: String(line.text ?? "").trim(),
-      });
-    }
-  }
-  return items.filter((item) => item.text);
-}
-
-function regionFromGoogleVertices(vertices, page) {
-  if (!Array.isArray(vertices) || vertices.length === 0) {
-    return { type: "box", x: 0, y: 0, width: page.width, height: page.height };
-  }
-  const xs = vertices.map((vertex) => Number(vertex.x ?? 0));
-  const ys = vertices.map((vertex) => Number(vertex.y ?? 0));
-  const minX = Math.max(0, Math.min(...xs));
-  const minY = Math.max(0, Math.min(...ys));
-  const maxX = Math.max(minX + 1, Math.max(...xs));
-  const maxY = Math.max(minY + 1, Math.max(...ys));
-  return { type: "box", x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-}
-
-function parseGoogleVisionResult(payload, page) {
-  const annotations = payload?.responses?.[0]?.textAnnotations ?? [];
-  return annotations.slice(1).map((annotation, index) => ({
-    confidence: null,
-    pageId: page.pageId,
-    readingOrder: index + 1,
-    region: regionFromGoogleVertices(annotation.boundingPoly?.vertices, page),
-    text: String(annotation.description ?? "").trim(),
-  })).filter((item) => item.text);
-}
-
 async function checkPythonImport(moduleName) {
   const python = process.env.FLORIS_PYTHON || "python";
   const result = await runProcess(
@@ -523,6 +441,13 @@ async function checkPythonImport(moduleName) {
     { timeoutMs: 8_000 },
   );
   return result.ok;
+}
+
+async function checkPythonImportAny(moduleNames) {
+  for (const moduleName of moduleNames) {
+    if (await checkPythonImport(moduleName)) return true;
+  }
+  return false;
 }
 
 class OcrProviderRegistry {
@@ -588,21 +513,18 @@ class OcrProviderRegistry {
         return { ...provider, available, reason: available ? null : provider.setup };
       }
 
+      if (providerId === "rapidocr") {
+        const available = await checkPythonImportAny(["rapidocr", "rapidocr_onnxruntime"]);
+        return { ...provider, available, reason: available ? null : provider.setup };
+      }
+
+      if (providerId === "doctr") {
+        const available = await checkPythonImport("doctr");
+        return { ...provider, available, reason: available ? null : provider.setup };
+      }
+
       if (providerId === "manga-ocr") {
         const available = await checkPythonImport("manga_ocr");
-        return { ...provider, available, reason: available ? null : provider.setup };
-      }
-
-      if (providerId === "azure-read") {
-        const available = Boolean(
-          (process.env.AZURE_AI_VISION_ENDPOINT || process.env.AZURE_VISION_ENDPOINT) &&
-          (process.env.AZURE_AI_VISION_KEY || process.env.AZURE_VISION_KEY),
-        );
-        return { ...provider, available, reason: available ? null : provider.setup };
-      }
-
-      if (providerId === "google-vision") {
-        const available = Boolean(process.env.GOOGLE_CLOUD_VISION_API_KEY);
         return { ...provider, available, reason: available ? null : provider.setup };
       }
     } catch (error) {
@@ -621,11 +543,15 @@ class OcrProviderRegistry {
     if (!provider) throw new Error(`Unknown OCR provider: ${providerId}`);
     if (providerId === "windows") return this.runWindowsOcr(page, options);
     if (providerId === "tesseract") return this.runTesseract(page, options);
-    if (providerId === "paddleocr" || providerId === "easyocr" || providerId === "manga-ocr") {
+    if (
+      providerId === "paddleocr" ||
+      providerId === "easyocr" ||
+      providerId === "rapidocr" ||
+      providerId === "doctr" ||
+      providerId === "manga-ocr"
+    ) {
       return this.runPythonProvider(providerId, page, options);
     }
-    if (providerId === "azure-read") return this.runAzureRead(page, options);
-    if (providerId === "google-vision") return this.runGoogleVision(page);
     throw new Error(`OCR provider is not implemented: ${providerId}`);
   }
 
@@ -701,78 +627,6 @@ class OcrProviderRegistry {
     return {
       languageDetected: language,
       items: normalizeItems(parseTesseractTsv(result.stdout, page), page),
-    };
-  }
-
-  async runAzureRead(page, options) {
-    const endpoint = (process.env.AZURE_AI_VISION_ENDPOINT || process.env.AZURE_VISION_ENDPOINT || "").replace(/\/+$/, "");
-    const key = process.env.AZURE_AI_VISION_KEY || process.env.AZURE_VISION_KEY;
-    if (!endpoint || !key) throw new Error("Azure Vision endpoint/key are not configured.");
-
-    const language = languageHintToAzure(options.languageHint);
-    const query = language ? `?language=${encodeURIComponent(language)}` : "";
-    const imageBytes = await fs.readFile(page.imagePath);
-    const analyze = await fetch(`${endpoint}/vision/v3.2/read/analyze${query}`, {
-      body: imageBytes,
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "Ocp-Apim-Subscription-Key": key,
-      },
-      method: "POST",
-    });
-    if (!analyze.ok) {
-      throw new Error(`Azure Read request failed: ${analyze.status} ${await analyze.text()}`);
-    }
-
-    const operationLocation = analyze.headers.get("operation-location");
-    if (!operationLocation) throw new Error("Azure Read did not return an operation-location header.");
-
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-      const poll = await fetch(operationLocation, {
-        headers: { "Ocp-Apim-Subscription-Key": key },
-      });
-      if (!poll.ok) throw new Error(`Azure Read polling failed: ${poll.status} ${await poll.text()}`);
-      const payload = await poll.json();
-      if (payload.status === "succeeded") {
-        return {
-          languageDetected: language || null,
-          items: normalizeItems(parseAzureReadResult(payload, page), page),
-        };
-      }
-      if (payload.status === "failed") {
-        throw new Error("Azure Read failed to analyze the image.");
-      }
-    }
-
-    throw new Error("Azure Read timed out while polling OCR result.");
-  }
-
-  async runGoogleVision(page) {
-    const key = process.env.GOOGLE_CLOUD_VISION_API_KEY;
-    if (!key) throw new Error("GOOGLE_CLOUD_VISION_API_KEY is not configured.");
-
-    const imageBytes = await fs.readFile(page.imagePath);
-    const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(key)}`, {
-      body: JSON.stringify({
-        requests: [
-          {
-            features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
-            image: { content: imageBytes.toString("base64") },
-          },
-        ],
-      }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
-    });
-    if (!response.ok) throw new Error(`Google Vision request failed: ${response.status} ${await response.text()}`);
-    const payload = await response.json();
-    const error = payload?.responses?.[0]?.error;
-    if (error) throw new Error(error.message ?? "Google Vision failed.");
-
-    return {
-      languageDetected: null,
-      items: normalizeItems(parseGoogleVisionResult(payload, page), page),
     };
   }
 }
