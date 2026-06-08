@@ -478,6 +478,7 @@ function AppShell() {
   const isLibraryView = location.pathname === "/library" || location.pathname.startsWith("/projects");
   const isExplorerView = location.pathname.startsWith("/explorer");
   const isSettingsView = location.pathname === "/settings";
+  const isTranslationView = /^\/projects\/[^/]+\/chapters\/[^/]+\/translate$/.test(location.pathname);
   const explorerPathParts = location.pathname.split("/").filter(Boolean);
   const querySourceId = new URLSearchParams(location.search).get("source");
   const activeExplorerSourceId =
@@ -491,81 +492,83 @@ function AppShell() {
   }, [isExplorerView, isLibraryView]);
 
   return (
-    <div className="app-shell">
-      <aside className="app-sidebar">
-        <div className="sidebar-scroll">
-          <div className="sidebar-group">
-            <SidebarGroupButton
-              active={isLibraryView}
-              expanded={libraryExpanded}
-              icon={<LibraryIcon size={18} />}
-              label="Library"
-              onClick={() => {
-                navigate("/library");
-                setLibraryExpanded((value) => !value);
-              }}
-            />
-            {libraryExpanded ? (
-              <div className="sidebar-subnav">
-                <SidebarSubLink active={location.pathname === "/library"} to="/library">
-                  All Projects
-                </SidebarSubLink>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="sidebar-group">
-            <SidebarGroupButton
-              active={isExplorerView}
-              expanded={explorerExpanded}
-              icon={<Compass size={18} />}
-              label="Explorer"
-              onClick={() => {
-                navigate(activeExplorerSourceId ? sourceExplorerPath(activeExplorerSourceId) : "/explorer");
-                setExplorerExpanded((value) => !value);
-              }}
-            />
-            {explorerExpanded ? (
-              <div className="sidebar-subnav">
-                {sources.map((source: SourceCatalogItem) => {
-                  const sourceId = source.metadata.sourceId;
-                  return (
-                    <SidebarSubLink
-                      active={isExplorerView && activeExplorerSourceId === sourceId}
-                      key={sourceId}
-                      to={sourceExplorerPath(sourceId)}
-                    >
-                      {source.metadata.displayName}
-                    </SidebarSubLink>
-                  );
-                })}
-                {sources.length === 0 ? (
-                  <SidebarSubLink active={isExplorerView && !activeExplorerSourceId} to="/explorer">
-                    All Sources
+    <div className={isTranslationView ? "app-shell app-shell--translation" : "app-shell"}>
+      {isTranslationView ? null : (
+        <aside className="app-sidebar">
+          <div className="sidebar-scroll">
+            <div className="sidebar-group">
+              <SidebarGroupButton
+                active={isLibraryView}
+                expanded={libraryExpanded}
+                icon={<LibraryIcon size={18} />}
+                label="Library"
+                onClick={() => {
+                  navigate("/library");
+                  setLibraryExpanded((value) => !value);
+                }}
+              />
+              {libraryExpanded ? (
+                <div className="sidebar-subnav">
+                  <SidebarSubLink active={location.pathname === "/library"} to="/library">
+                    All Projects
                   </SidebarSubLink>
-                ) : null}
-              </div>
-            ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="sidebar-group">
+              <SidebarGroupButton
+                active={isExplorerView}
+                expanded={explorerExpanded}
+                icon={<Compass size={18} />}
+                label="Explorer"
+                onClick={() => {
+                  navigate(activeExplorerSourceId ? sourceExplorerPath(activeExplorerSourceId) : "/explorer");
+                  setExplorerExpanded((value) => !value);
+                }}
+              />
+              {explorerExpanded ? (
+                <div className="sidebar-subnav">
+                  {sources.map((source: SourceCatalogItem) => {
+                    const sourceId = source.metadata.sourceId;
+                    return (
+                      <SidebarSubLink
+                        active={isExplorerView && activeExplorerSourceId === sourceId}
+                        key={sourceId}
+                        to={sourceExplorerPath(sourceId)}
+                      >
+                        {source.metadata.displayName}
+                      </SidebarSubLink>
+                    );
+                  })}
+                  {sources.length === 0 ? (
+                    <SidebarSubLink active={isExplorerView && !activeExplorerSourceId} to="/explorer">
+                      All Sources
+                    </SidebarSubLink>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            <NavLink
+              className={({ isActive }) =>
+                isActive || isSettingsView ? "sidebar-nav-item active" : "sidebar-nav-item"
+              }
+              to="/settings"
+            >
+              <span className="sidebar-nav-item__icon">
+                <Settings size={18} />
+              </span>
+              <span>Settings</span>
+            </NavLink>
           </div>
 
-          <NavLink
-            className={({ isActive }) =>
-              isActive || isSettingsView ? "sidebar-nav-item active" : "sidebar-nav-item"
-            }
-            to="/settings"
-          >
-            <span className="sidebar-nav-item__icon">
-              <Settings size={18} />
-            </span>
-            <span>Settings</span>
-          </NavLink>
-        </div>
-
-        <div className="sidebar-status">
-          <span>{runtimeLabel}</span>
-          <strong>{dataLabel}</strong>
-        </div>
-      </aside>
+          <div className="sidebar-status">
+            <span>{runtimeLabel}</span>
+            <strong>{dataLabel}</strong>
+          </div>
+        </aside>
+      )}
 
       <main className="app-main">
         <Routes>
@@ -2188,10 +2191,13 @@ function TranslationPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const editPageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const splitStageRef = useRef<HTMLDivElement | null>(null);
   const translationScreenRef = useRef<HTMLElement | null>(null);
   const ocrSelectionRef = useRef<OcrSelectionState | null>(null);
   const [viewerMode, setViewerMode] = useState<"page" | "webtoon">("page");
   const [mergePages, setMergePages] = useState(false);
+  const [originalPanePercent, setOriginalPanePercent] = useState(44);
   const [ocrProviderId, setOcrProviderId] = useState<OcrProviderId>("windows");
   const [ocrLanguageHint, setOcrLanguageHint] = useState("english");
   const [replaceOcrText, setReplaceOcrText] = useState(true);
@@ -2302,6 +2308,7 @@ function TranslationPage() {
     if (viewerMode !== "webtoon" || !selectedPageId) return;
     window.requestAnimationFrame(() => {
       pageRefs.current[selectedPageId]?.scrollIntoView({ block: "start" });
+      editPageRefs.current[selectedPageId]?.scrollIntoView({ block: "start" });
     });
   }, [selectedPageId, viewerMode]);
 
@@ -2344,6 +2351,7 @@ function TranslationPage() {
     if (viewerMode === "webtoon") {
       window.requestAnimationFrame(() => {
         pageRefs.current[pageId]?.scrollIntoView({ block: "start" });
+        editPageRefs.current[pageId]?.scrollIntoView({ block: "start" });
       });
     }
   };
@@ -2450,6 +2458,27 @@ function TranslationPage() {
     setOcrSelection(finalSelection);
     if (shouldRun) runOcrSelection(finalSelection);
   };
+  const updatePageSplit = (clientX: number) => {
+    const bounds = splitStageRef.current?.getBoundingClientRect();
+    if (!bounds || bounds.width <= 0) return;
+    const nextPercent = ((clientX - bounds.left) / bounds.width) * 100;
+    setOriginalPanePercent(Math.max(28, Math.min(62, nextPercent)));
+  };
+  const beginPageSplitResize = (event: PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    updatePageSplit(event.clientX);
+
+    const handleMove = (moveEvent: globalThis.PointerEvent) => {
+      updatePageSplit(moveEvent.clientX);
+    };
+    const handleUp = () => {
+      document.removeEventListener("pointermove", handleMove);
+      document.removeEventListener("pointerup", handleUp);
+    };
+
+    document.addEventListener("pointermove", handleMove);
+    document.addEventListener("pointerup", handleUp, { once: true });
+  };
   const confirmOcrSelectionOnEnter = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key !== "Enter" || activeTool !== "ocr") return;
     const target = event.target instanceof HTMLElement ? event.target : null;
@@ -2458,6 +2487,93 @@ function TranslationPage() {
     const selection = ocrSelectionRef.current ?? ocrSelection;
     if (selection) runOcrSelection(selection);
   };
+  const pageSurfaceStyle = (page: Page) => ({
+    height: page.height * zoom,
+    width: page.width * zoom,
+  });
+  const editRegionStyle = (unit: TextUnit) => ({
+    height: Math.max(22, unit.region.height * zoom),
+    left: unit.region.x * zoom,
+    top: unit.region.y * zoom,
+    width: Math.max(48, unit.region.width * zoom),
+  });
+  const renderPageArtwork = (page: Page) =>
+    isRenderableImageUrl(page.imageUrl) ? (
+      <img className="page-image" src={page.imageUrl ?? ""} alt={`Page ${page.index}`} />
+    ) : (
+      <>
+        <div className="mock-panel panel-a" />
+        <div className="mock-panel panel-b" />
+        <div className="mock-panel panel-c" />
+      </>
+    );
+  const renderOriginalPageSurface = (page: Page, units: TextUnit[], surfaceClassName = "") => (
+    <div
+      className={`mock-page original-page-surface page-tone-${page.imageTone} ${surfaceClassName}`.trim()}
+      style={pageSurfaceStyle(page)}
+    >
+      {renderPageArtwork(page)}
+      <svg
+        className={activeTool === "ocr" ? "region-layer is-selecting" : "region-layer"}
+        tabIndex={0}
+        viewBox={`0 0 ${page.width} ${page.height}`}
+        onPointerDown={(event) => beginOcrSelection(event, page)}
+        onPointerMove={(event) => moveOcrSelection(event, page)}
+        onPointerUp={(event) => endOcrSelection(event, page)}
+        onPointerCancel={(event) => endOcrSelection(event, page, false)}
+      >
+        {units.map((unit) => (
+          <rect
+            key={unit.id}
+            x={unit.region.x}
+            y={unit.region.y}
+            width={unit.region.width}
+            height={unit.region.height}
+            rx={12}
+            className={unit.id === selectedTextUnit?.id ? "region selected" : "region"}
+            onClick={() => {
+              if (activeTool !== "ocr") selectTextUnit(unit);
+            }}
+          />
+        ))}
+        {ocrSelection?.pageId === page.id && selectedOcrRegion ? (
+          <rect
+            className="ocr-selection-region"
+            x={selectedOcrRegion.x}
+            y={selectedOcrRegion.y}
+            width={selectedOcrRegion.width}
+            height={selectedOcrRegion.height}
+            rx={10}
+          />
+        ) : null}
+      </svg>
+    </div>
+  );
+  const renderEditPageSurface = (page: Page, units: TextUnit[], surfaceClassName = "") => (
+    <div
+      className={`mock-page edit-page-surface page-tone-${page.imageTone} ${surfaceClassName}`.trim()}
+      style={pageSurfaceStyle(page)}
+    >
+      {renderPageArtwork(page)}
+      <div className="edit-work-layer">
+        {units.map((unit) => {
+          const label = unit.finalTranslation || unit.microsoftTranslation || unit.aiTranslation || unit.sourceText;
+          return (
+            <button
+              className={unit.id === selectedTextUnit?.id ? "edit-text-region selected" : "edit-text-region"}
+              key={unit.id}
+              onClick={() => selectTextUnit(unit)}
+              style={editRegionStyle(unit)}
+              title={unit.sourceText}
+              type="button"
+            >
+              <span dir="auto">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   return (
     <section
@@ -2618,128 +2734,87 @@ function TranslationPage() {
             </div>
           </div>
 
-          <div className={viewerMode === "webtoon" ? "page-stage webtoon-stage" : "page-stage"}>
-            {viewerMode === "page" ? (
-              <div
-                className={`mock-page page-tone-${currentPage.imageTone}`}
-                style={{
-                  width: currentPage.width * zoom,
-                  height: currentPage.height * zoom,
-                }}
-              >
-                {isRenderableImageUrl(currentPage.imageUrl) ? (
-                  <img className="page-image" src={currentPage.imageUrl ?? ""} alt={`Page ${currentPage.index}`} />
+          <div
+            className="page-stage translation-split-stage"
+            ref={splitStageRef}
+            style={{ gridTemplateColumns: `${originalPanePercent}% 10px minmax(0, 1fr)` }}
+          >
+            <section className="translation-page-pane translation-page-pane--original">
+              <div className="translation-pane-header">
+                <strong>Original</strong>
+                <span>OCR source</span>
+              </div>
+              <div className={viewerMode === "webtoon" ? "pane-page-scroll webtoon-stage" : "pane-page-scroll"}>
+                {viewerMode === "page" ? (
+                  renderOriginalPageSurface(currentPage, pageTextUnits)
                 ) : (
-                  <>
-                    <div className="mock-panel panel-a" />
-                    <div className="mock-panel panel-b" />
-                    <div className="mock-panel panel-c" />
-                  </>
-                )}
-                <svg
-                  className={activeTool === "ocr" ? "region-layer is-selecting" : "region-layer"}
-                  tabIndex={0}
-                  viewBox={`0 0 ${currentPage.width} ${currentPage.height}`}
-                  onPointerDown={(event) => beginOcrSelection(event, currentPage)}
-                  onPointerMove={(event) => moveOcrSelection(event, currentPage)}
-                  onPointerUp={(event) => endOcrSelection(event, currentPage)}
-                  onPointerCancel={(event) => endOcrSelection(event, currentPage, false)}
-                >
-                  {pageTextUnits.map((unit) => (
-                    <rect
-                      key={unit.id}
-                      x={unit.region.x}
-                      y={unit.region.y}
-                      width={unit.region.width}
-                      height={unit.region.height}
-                      rx={12}
-                      className={unit.id === selectedTextUnit?.id ? "region selected" : "region"}
-                      onClick={() => {
-                        if (activeTool !== "ocr") setSelectedTextUnitId(unit.id);
-                      }}
-                    />
-                  ))}
-                  {ocrSelection?.pageId === currentPage.id && selectedOcrRegion ? (
-                    <rect
-                      className="ocr-selection-region"
-                      x={selectedOcrRegion.x}
-                      y={selectedOcrRegion.y}
-                      width={selectedOcrRegion.width}
-                      height={selectedOcrRegion.height}
-                      rx={10}
-                    />
-                  ) : null}
-                </svg>
-              </div>
-            ) : (
-              <div className={mergePages ? "webtoon-page-stack merged" : "webtoon-page-stack"}>
-                {workspace.pages.map((page) => {
-                  const units = textUnitsByPage.get(page.id) ?? [];
-                  return (
-                    <div
-                      className={page.id === currentPage.id ? "webtoon-page-anchor active" : "webtoon-page-anchor"}
-                      data-page-index={page.index}
-                      key={page.id}
-                      ref={(element) => {
-                        pageRefs.current[page.id] = element;
-                      }}
-                    >
-                      <div
-                        className={`mock-page webtoon-page-surface page-tone-${page.imageTone}`}
-                        style={{
-                          width: page.width * zoom,
-                          height: page.height * zoom,
-                        }}
-                      >
-                        {isRenderableImageUrl(page.imageUrl) ? (
-                          <img className="page-image" src={page.imageUrl ?? ""} alt={`Page ${page.index}`} />
-                        ) : (
-                          <>
-                            <div className="mock-panel panel-a" />
-                            <div className="mock-panel panel-b" />
-                            <div className="mock-panel panel-c" />
-                          </>
-                        )}
-                        <svg
-                          className={activeTool === "ocr" ? "region-layer is-selecting" : "region-layer"}
-                          tabIndex={0}
-                          viewBox={`0 0 ${page.width} ${page.height}`}
-                          onPointerDown={(event) => beginOcrSelection(event, page)}
-                          onPointerMove={(event) => moveOcrSelection(event, page)}
-                          onPointerUp={(event) => endOcrSelection(event, page)}
-                          onPointerCancel={(event) => endOcrSelection(event, page, false)}
+                  <div className={mergePages ? "webtoon-page-stack merged" : "webtoon-page-stack"}>
+                    {workspace.pages.map((page) => {
+                      const units = textUnitsByPage.get(page.id) ?? [];
+                      return (
+                        <div
+                          className={page.id === currentPage.id ? "webtoon-page-anchor active" : "webtoon-page-anchor"}
+                          data-page-index={page.index}
+                          key={page.id}
+                          ref={(element) => {
+                            pageRefs.current[page.id] = element;
+                          }}
                         >
-                          {units.map((unit) => (
-                            <rect
-                              key={unit.id}
-                              x={unit.region.x}
-                              y={unit.region.y}
-                              width={unit.region.width}
-                              height={unit.region.height}
-                              rx={12}
-                              className={unit.id === selectedTextUnit?.id ? "region selected" : "region"}
-                              onClick={() => {
-                                if (activeTool !== "ocr") selectTextUnit(unit);
-                              }}
-                            />
-                          ))}
-                          {ocrSelection?.pageId === page.id && selectedOcrRegion ? (
-                            <rect
-                              className="ocr-selection-region"
-                              x={selectedOcrRegion.x}
-                              y={selectedOcrRegion.y}
-                              width={selectedOcrRegion.width}
-                              height={selectedOcrRegion.height}
-                              rx={10}
-                            />
-                          ) : null}
-                        </svg>
-                      </div>
-                    </div>
-                  );
-                })}
+                          {renderOriginalPageSurface(page, units, "webtoon-page-surface")}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
+            </section>
+
+            <div
+              aria-label="Resize original and edit panes"
+              className="pane-resizer"
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft") {
+                  event.preventDefault();
+                  setOriginalPanePercent((value) => Math.max(28, value - 3));
+                } else if (event.key === "ArrowRight") {
+                  event.preventDefault();
+                  setOriginalPanePercent((value) => Math.min(62, value + 3));
+                }
+              }}
+              onPointerDown={beginPageSplitResize}
+              role="separator"
+              tabIndex={0}
+            />
+
+            <section className="translation-page-pane translation-page-pane--edit">
+              <div className="translation-pane-header">
+                <strong>Edit</strong>
+                <span>Working copy</span>
+              </div>
+              <div className={viewerMode === "webtoon" ? "pane-page-scroll webtoon-stage" : "pane-page-scroll"}>
+                {viewerMode === "page" ? (
+                  renderEditPageSurface(currentPage, pageTextUnits)
+                ) : (
+                  <div className={mergePages ? "webtoon-page-stack merged" : "webtoon-page-stack"}>
+                    {workspace.pages.map((page) => {
+                      const units = textUnitsByPage.get(page.id) ?? [];
+                      return (
+                        <div
+                          className={page.id === currentPage.id ? "webtoon-page-anchor active" : "webtoon-page-anchor"}
+                          data-page-index={page.index}
+                          key={page.id}
+                          ref={(element) => {
+                            editPageRefs.current[page.id] = element;
+                          }}
+                        >
+                          {renderEditPageSurface(page, units, "webtoon-page-surface")}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </section>
           </div>
         </main>
 
