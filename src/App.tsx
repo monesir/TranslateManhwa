@@ -2292,6 +2292,7 @@ function TranslationPage() {
         ...ocrInput,
         expansion: DEFAULT_OCR_REGION_EXPANSION,
         region,
+        replaceExisting: false,
       },
       pageId: selection.pageId,
     });

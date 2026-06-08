@@ -135,7 +135,7 @@ class OcrService {
       });
       return this.repository.applyRecognition({
         languageDetected: result.languageDetected,
-        pageResults: [{ items: result.items, page, replaceRegion: expandedRegion }],
+        pageResults: [{ items: result.items, page, replaceRegion: selectedRegion }],
         provider: options.providerId,
         replaceExisting: options.replaceExisting,
         run,
