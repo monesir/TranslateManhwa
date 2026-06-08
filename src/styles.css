@@ -304,6 +304,12 @@ h3 {
   font-weight: 700;
 }
 
+.button.active-command {
+  border-color: #6b552a;
+  background: #2b2518;
+  color: #f0c66d;
+}
+
 .button.secondary:hover,
 .icon-button:hover,
 .tool-button:hover {

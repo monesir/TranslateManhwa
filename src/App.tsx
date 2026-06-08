@@ -132,12 +132,12 @@ function statusClass(status: string) {
 
 const genderOptions: Gender[] = ["Male", "Female", "Unknown"];
 const ocrLanguageOptions = [
+  ["", "Auto"],
   ["korean", "Korean"],
   ["japanese", "Japanese"],
   ["chinese", "Chinese"],
   ["english", "English"],
   ["arabic", "Arabic"],
-  ["", "Auto"],
 ] as const;
 const sourceStatusOptions: OcrSourceStatus[] = [
   "Needs Review",
@@ -2110,7 +2110,7 @@ function TranslationPage() {
   const [viewerMode, setViewerMode] = useState<"page" | "webtoon">("page");
   const [mergePages, setMergePages] = useState(false);
   const [ocrProviderId, setOcrProviderId] = useState<OcrProviderId>("windows");
-  const [ocrLanguageHint, setOcrLanguageHint] = useState("korean");
+  const [ocrLanguageHint, setOcrLanguageHint] = useState("");
   const [replaceOcrText, setReplaceOcrText] = useState(true);
   const [ocrSelection, setOcrSelection] = useState<OcrSelectionState | null>(null);
   const [ocrExpansion, setOcrExpansion] = useState<OcrRegionExpansion>({
@@ -2392,6 +2392,15 @@ function TranslationPage() {
             Page OCR
           </button>
           <button
+            className={activeTool === "ocr" ? "button secondary active-command" : "button secondary"}
+            disabled={isOcrRunning}
+            onClick={() => setActiveTool("ocr")}
+            title="Enable OCR rectangle selection"
+          >
+            <Highlighter size={15} />
+            Select text
+          </button>
+          <button
             className="button secondary"
             disabled={isOcrRunning || !selectedProvider?.available || !selectedOcrRegion}
             onClick={runSelectedRegionOcr}
@@ -2645,6 +2654,15 @@ function TranslationPage() {
                 ? `${Math.round(selectedOcrRegion.width)} x ${Math.round(selectedOcrRegion.height)}`
                 : "Use the OCR tool and drag over text."}
             </p>
+            <button
+              className={activeTool === "ocr" ? "button secondary full-width active-command" : "button secondary full-width"}
+              disabled={isOcrRunning}
+              onClick={() => setActiveTool("ocr")}
+              type="button"
+            >
+              <Highlighter size={15} />
+              Select text region
+            </button>
             <div className="ocr-expansion-grid">
               {(["left", "right", "top", "bottom"] as const).map((side) => (
                 <label className="form-field" key={side}>
