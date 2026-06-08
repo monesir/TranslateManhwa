@@ -47,6 +47,7 @@ function mimeTypeFromExtension(extension) {
     case ".webp":
       return "image/webp";
     case ".jpg":
+    case ".jpeg":
       return "image/jpeg";
     case ".png":
       return "image/png";

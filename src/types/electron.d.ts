@@ -3,6 +3,7 @@ import type {
   Character,
   CharacterAlias,
   CharacterInput,
+  CreateChapterInput,
   CreateProjectInput,
   GlossaryTermInput,
   GlossaryTerm,
@@ -25,6 +26,11 @@ interface FlorisApi {
   getLibraryStats(): Promise<LibraryStats>;
   getProjectOverview(projectId: string): Promise<ProjectOverview | undefined>;
   listProjectChapters(projectId: string): Promise<import("./domain").Chapter[]>;
+  createProjectChapter(
+    projectId: string,
+    input: CreateChapterInput,
+  ): Promise<SourceChapterPreparationResult>;
+  pickChapterImages(): Promise<string[]>;
   getProjectDictionary(projectId: string): Promise<{
     characters: Character[];
     glossaryTerms: GlossaryTerm[];

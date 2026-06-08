@@ -1,4 +1,4 @@
-const { ipcMain } = require("electron");
+const { dialog, ipcMain } = require("electron");
 
 function registerIpcHandlers(appApi) {
   const handlers = {
@@ -7,6 +7,22 @@ function registerIpcHandlers(appApi) {
     "data:getLibraryStats": () => appApi.getLibraryStats(),
     "data:getProjectOverview": (_event, projectId) => appApi.getProjectOverview(projectId),
     "data:listProjectChapters": (_event, projectId) => appApi.listProjectChapters(projectId),
+    "data:createProjectChapter": (_event, projectId, input) =>
+      appApi.createProjectChapter(projectId, input),
+    "data:pickChapterImages": async () => {
+      const result = await dialog.showOpenDialog({
+        title: "Choose chapter page images",
+        properties: ["openFile", "multiSelections"],
+        filters: [
+          {
+            name: "Images",
+            extensions: ["avif", "gif", "jpeg", "jpg", "png", "webp"],
+          },
+        ],
+      });
+
+      return result.canceled ? [] : result.filePaths;
+    },
     "data:getProjectDictionary": (_event, projectId) => appApi.getProjectDictionary(projectId),
     "data:getChapterForTranslation": (_event, chapterId) =>
       appApi.getChapterForTranslation(chapterId),

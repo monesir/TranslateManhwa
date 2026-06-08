@@ -1,13 +1,16 @@
 import type {
+  Chapter,
   ChapterTranslationWorkspace,
   Character,
   CharacterAlias,
   CharacterInput,
+  CreateChapterInput,
   CreateProjectInput,
   GlossaryTermInput,
   ExplorerSeriesDetails,
   GlossaryTerm,
   LibraryStats,
+  Page,
   Project,
   ProjectOverview,
   SourceCatalogItem,
@@ -36,6 +39,8 @@ let mutableCharacters: Character[] = [...characters];
 let mutableGlossaryTerms: GlossaryTerm[] = [...glossaryTerms];
 let mutableProjects: Project[] = [...projects];
 let mutableProjectOverviews: ProjectOverview[] = [...projectOverviews];
+let mutableChapters: Chapter[] = [...chapters];
+let mutablePages: Page[] = [...pages];
 
 function slugify(value: string) {
   return value
@@ -182,6 +187,81 @@ export async function prepareLibraryChapter(
   throw new Error("Library chapter preparation requires the Electron runtime");
 }
 
+export async function pickChapterImages(): Promise<string[]> {
+  if (window.florisApi) return window.florisApi.pickChapterImages();
+  throw new Error("Choosing chapter images requires the Electron runtime");
+}
+
+export async function createProjectChapter(
+  projectId: string,
+  input: CreateChapterInput,
+): Promise<SourceChapterPreparationResult> {
+  if (window.florisApi) return window.florisApi.createProjectChapter(projectId, input);
+
+  const project = mutableProjects.find((item) => item.id === projectId);
+  if (!project) throw new Error("Project not found");
+
+  const timestamp = new Date().toISOString();
+  const number = input.number.trim() || "1";
+  const title = input.title?.trim() || undefined;
+  const chapterId = `${projectId}_chapter_${Date.now()}`;
+  const chapter: Chapter = {
+    id: chapterId,
+    projectId,
+    number,
+    title,
+    displayLabel: `Chapter ${number}`,
+    status: "In Progress",
+    internalStatus: "Images Ready",
+    downloadStatus: "Downloaded",
+    downloadedAt: timestamp,
+    pagesCount: input.imagePaths.length,
+    textUnitsCount: 0,
+    progress: 0,
+    updatedAt: timestamp,
+  };
+  const chapterPages: Page[] = input.imagePaths.map((_imagePath, index) => ({
+    id: `page_${chapterId}_${index + 1}`,
+    chapterId,
+    index: index + 1,
+    imageTone: index % 2 === 0 ? "night" : "gate",
+    imageUrl: null,
+    width: 820,
+    height: 1240,
+  }));
+
+  mutableChapters = [...mutableChapters, chapter];
+  mutablePages = [...mutablePages, ...chapterPages];
+  mutableProjects = mutableProjects.map((item) =>
+    item.id === projectId
+      ? {
+          ...item,
+          lastWorkedChapterId: chapterId,
+          lastWorkedChapterLabel: chapter.displayLabel,
+          lastModifiedAt: timestamp,
+        }
+      : item,
+  );
+  mutableProjectOverviews = mutableProjectOverviews.map((item) =>
+    item.id === projectId
+      ? {
+          ...item,
+          chaptersCount: item.chaptersCount + 1,
+          lastWorkedChapterId: chapterId,
+          lastWorkedChapterLabel: chapter.displayLabel,
+          lastModifiedAt: timestamp,
+        }
+      : item,
+  );
+
+  return delay({
+    projectId,
+    chapterId,
+    pagesCount: chapterPages.length,
+    chapter,
+  });
+}
+
 export async function getProjectOverview(projectId: string): Promise<ProjectOverview | undefined> {
   if (window.florisApi) return window.florisApi.getProjectOverview(projectId);
   return delay(mutableProjectOverviews.find((project) => project.id === projectId));
@@ -189,7 +269,7 @@ export async function getProjectOverview(projectId: string): Promise<ProjectOver
 
 export async function listProjectChapters(projectId: string) {
   if (window.florisApi) return window.florisApi.listProjectChapters(projectId);
-  return delay(chapters.filter((chapter) => chapter.projectId === projectId));
+  return delay(mutableChapters.filter((chapter) => chapter.projectId === projectId));
 }
 
 export async function getProjectDictionary(projectId: string) {
@@ -206,16 +286,16 @@ export async function getChapterForTranslation(
 ): Promise<ChapterTranslationWorkspace | undefined> {
   if (window.florisApi) return window.florisApi.getChapterForTranslation(chapterId);
 
-  const chapter = chapters.find((item) => item.id === chapterId);
+  const chapter = mutableChapters.find((item) => item.id === chapterId);
   if (!chapter) return delay(undefined);
 
-  const project = projects.find((item) => item.id === chapter.projectId);
+  const project = mutableProjects.find((item) => item.id === chapter.projectId);
   if (!project) return delay(undefined);
 
   return delay({
     project,
     chapter,
-    pages: pages.filter((page) => page.chapterId === chapterId),
+    pages: mutablePages.filter((page) => page.chapterId === chapterId),
     textUnits: mutableTextUnits.filter((unit) => unit.chapterId === chapterId),
     characters: mutableCharacters.filter((character) => character.projectId === project.id),
     glossaryTerms: mutableGlossaryTerms.filter((term) => term.projectId === project.id),

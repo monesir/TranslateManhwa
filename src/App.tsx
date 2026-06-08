@@ -54,6 +54,7 @@ import {
   addCharacter,
   addGlossaryTerm,
   browseSourceTitles,
+  createProjectChapter,
   createProject,
   deleteCharacter,
   deleteGlossaryTerm,
@@ -68,6 +69,7 @@ import {
   listProjectChapters,
   listProjects,
   listSourceCatalog,
+  pickChapterImages,
   prepareLibraryChapter,
   prepareSourceChapter,
   searchSourceTitles,
@@ -81,6 +83,7 @@ import type {
   Character,
   CharacterAliasInput,
   CharacterInput,
+  CreateChapterInput,
   CreateProjectInput,
   Gender,
   GlossaryTermInput,
@@ -135,6 +138,12 @@ interface CreateProjectFormState {
   contextSummary: string;
 }
 
+interface CreateChapterFormState {
+  number: string;
+  title: string;
+  imagePaths: string[];
+}
+
 function defaultCreateProjectForm(): CreateProjectFormState {
   return {
     title: "",
@@ -146,6 +155,18 @@ function defaultCreateProjectForm(): CreateProjectFormState {
     description: "",
     contextSummary: "",
   };
+}
+
+function defaultCreateChapterForm(): CreateChapterFormState {
+  return {
+    number: "",
+    title: "",
+    imagePaths: [],
+  };
+}
+
+function fileNameFromPath(value: string) {
+  return value.split(/[\\/]/).pop() ?? value;
 }
 
 function createEmptyCharacterForm(): CharacterFormState {
@@ -1242,9 +1263,28 @@ function OverviewTab({ overview }: { overview: ProjectOverview }) {
 function ChaptersTab({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [isCreateChapterOpen, setIsCreateChapterOpen] = useState(false);
+  const [chapterForm, setChapterForm] = useState<CreateChapterFormState>(
+    defaultCreateChapterForm,
+  );
+  const [imagePickerError, setImagePickerError] = useState<string | null>(null);
   const chaptersQuery = useQuery({
     queryKey: ["project-chapters", projectId],
     queryFn: () => listProjectChapters(projectId),
+  });
+  const createChapterMutation = useMutation({
+    mutationFn: (input: CreateChapterInput) => createProjectChapter(projectId, input),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["library-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", result.projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", result.projectId] });
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      setChapterForm(defaultCreateChapterForm());
+      setImagePickerError(null);
+      setIsCreateChapterOpen(false);
+      navigate(`/projects/${result.projectId}/chapters/${result.chapterId}/translate`);
+    },
   });
   const prepareChapterMutation = useMutation({
     mutationFn: (chapterId: string) => prepareLibraryChapter(chapterId),
@@ -1258,14 +1298,48 @@ function ChaptersTab({ projectId }: { projectId: string }) {
     },
   });
 
+  async function chooseChapterImages() {
+    setImagePickerError(null);
+    try {
+      const imagePaths = await pickChapterImages();
+      if (imagePaths.length > 0) {
+        setChapterForm((current) => ({ ...current, imagePaths }));
+      }
+    } catch (error) {
+      setImagePickerError(error instanceof Error ? error.message : "Could not choose images");
+    }
+  }
+
+  function submitChapter(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const number = chapterForm.number.trim();
+    if (!number || chapterForm.imagePaths.length === 0) return;
+
+    createChapterMutation.mutate({
+      number,
+      title: chapterForm.title.trim() || undefined,
+      imagePaths: chapterForm.imagePaths,
+    });
+  }
+
   if (chaptersQuery.isLoading) return <LoadingPanel label="Loading chapters" />;
   const rows = chaptersQuery.data ?? [];
 
   return (
     <div className="table-card">
       <div className="table-title">
-        <h2>Chapters</h2>
-        <span>{rows.length} chapters</span>
+        <div>
+          <h2>Chapters</h2>
+          <span>{rows.length} chapters</span>
+        </div>
+        <button
+          className="button primary"
+          type="button"
+          onClick={() => setIsCreateChapterOpen(true)}
+        >
+          <Plus size={16} />
+          Add chapter
+        </button>
       </div>
       {prepareChapterMutation.isError ? (
         <p className="error-line">
@@ -1287,6 +1361,122 @@ function ChaptersTab({ projectId }: { projectId: string }) {
           />
         ))}
       </div>
+      {isCreateChapterOpen ? (
+        <CreateChapterDialog
+          error={
+            createChapterMutation.error instanceof Error
+              ? createChapterMutation.error.message
+              : null
+          }
+          form={chapterForm}
+          imagePickerError={imagePickerError}
+          isSaving={createChapterMutation.isPending}
+          onChange={setChapterForm}
+          onChooseImages={chooseChapterImages}
+          onClose={() => {
+            if (!createChapterMutation.isPending) {
+              setImagePickerError(null);
+              setIsCreateChapterOpen(false);
+            }
+          }}
+          onSubmit={submitChapter}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function CreateChapterDialog({
+  error,
+  form,
+  imagePickerError,
+  isSaving,
+  onChange,
+  onChooseImages,
+  onClose,
+  onSubmit,
+}: {
+  error: string | null;
+  form: CreateChapterFormState;
+  imagePickerError: string | null;
+  isSaving: boolean;
+  onChange: (form: CreateChapterFormState) => void;
+  onChooseImages: () => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const selectedPreview = form.imagePaths.slice(0, 10);
+  const remainingCount = Math.max(0, form.imagePaths.length - selectedPreview.length);
+  const canSubmit = form.number.trim().length > 0 && form.imagePaths.length > 0 && !isSaving;
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <form
+        className="modal-card create-chapter-dialog"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={onSubmit}
+      >
+        <div className="modal-head">
+          <div>
+            <p className="eyebrow">Library</p>
+            <h2>Add chapter</h2>
+          </div>
+          <button className="icon-button" onClick={onClose} type="button" title="Close">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="editor-grid create-chapter-grid">
+          <label className="form-field">
+            <span>Chapter number</span>
+            <input
+              autoFocus
+              required
+              value={form.number}
+              onChange={(event) => onChange({ ...form, number: event.target.value })}
+              placeholder="1"
+            />
+          </label>
+          <label className="form-field">
+            <span>Title</span>
+            <input
+              value={form.title}
+              onChange={(event) => onChange({ ...form, title: event.target.value })}
+              placeholder="Optional"
+            />
+          </label>
+          <div className="form-field full">
+            <span>Page images</span>
+            <div className="chapter-image-picker">
+              <button className="button secondary" type="button" onClick={onChooseImages}>
+                <ImageIcon size={16} />
+                Choose images
+              </button>
+              <strong>{form.imagePaths.length} selected</strong>
+            </div>
+            {form.imagePaths.length > 0 ? (
+              <div className="selected-file-list">
+                {selectedPreview.map((imagePath) => (
+                  <span key={imagePath}>{fileNameFromPath(imagePath)}</span>
+                ))}
+                {remainingCount > 0 ? <span>+{remainingCount} more</span> : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {imagePickerError ? <p className="error-line">{imagePickerError}</p> : null}
+        {error ? <p className="error-line">{error}</p> : null}
+
+        <div className="form-actions end">
+          <button className="button secondary" type="button" onClick={onClose} disabled={isSaving}>
+            Cancel
+          </button>
+          <button className="button primary" type="submit" disabled={!canSubmit}>
+            {isSaving ? "Creating" : "Create chapter"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

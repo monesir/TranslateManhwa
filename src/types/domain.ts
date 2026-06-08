@@ -89,6 +89,12 @@ export interface CreateProjectInput {
   contextSummary?: string;
 }
 
+export interface CreateChapterInput {
+  number: string;
+  title?: string;
+  imagePaths: string[];
+}
+
 export interface LibraryStats {
   lastWorkedChapter: string;
   lastModifiedAt: string;

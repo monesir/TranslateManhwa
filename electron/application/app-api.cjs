@@ -20,10 +20,10 @@ const {
 
 function createAppApi(db, options = {}) {
   const projectRepository = new ProjectRepository(db);
-  const chapterRepository = new ChapterRepository(db);
   const dictionaryRepository = new DictionaryRepository(db);
   const coverCache = options.workspacePath ? new CoverCache(options.workspacePath) : null;
   const chapterPageStore = options.workspacePath ? new ChapterPageStore(options.workspacePath) : null;
+  const chapterRepository = new ChapterRepository(db, { chapterPageStore });
   const sourceImportRepository = new SourceImportRepository(db, { chapterPageStore, coverCache });
   const translationWorkspaceRepository = new TranslationWorkspaceRepository(db);
 
@@ -46,6 +46,10 @@ function createAppApi(db, options = {}) {
 
     listProjectChapters(projectId) {
       return chapterRepository.listProjectChapters(projectId);
+    },
+
+    createProjectChapter(projectId, input) {
+      return chapterRepository.createProjectChapter(projectId, input);
     },
 
     getProjectDictionary(projectId) {

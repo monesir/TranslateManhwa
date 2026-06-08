@@ -500,10 +500,12 @@ class SourceImportRepository {
           INSERT INTO assets (
             id, project_id, kind, path, mime_type, width, height, size_bytes,
             checksum, metadata_json, created_at
-          ) VALUES (?, ?, 'page', ?, ?, 820, 1240, ?, NULL, ?, ?)
+          ) VALUES (?, ?, 'page', ?, ?, ?, ?, ?, NULL, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             path = excluded.path,
             mime_type = excluded.mime_type,
+            width = excluded.width,
+            height = excluded.height,
             size_bytes = excluded.size_bytes,
             metadata_json = excluded.metadata_json
         `).run(
@@ -511,6 +513,8 @@ class SourceImportRepository {
           project.projectId,
           downloadedPage.stored.cacheUrl,
           downloadedPage.stored.mimeType,
+          downloadedPage.stored.width,
+          downloadedPage.stored.height,
           downloadedPage.stored.sizeBytes,
           JSON.stringify(downloadedPage.metadata),
           timestamp,
@@ -519,16 +523,20 @@ class SourceImportRepository {
         this.db.prepare(`
           INSERT INTO pages (
             id, chapter_id, asset_id, page_index, width, height, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, 820, 1240, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             asset_id = excluded.asset_id,
             page_index = excluded.page_index,
+            width = excluded.width,
+            height = excluded.height,
             updated_at = excluded.updated_at
         `).run(
           downloadedPage.pageId,
           chapterId,
           downloadedPage.assetId,
           downloadedPage.pageIndex,
+          downloadedPage.stored.width,
+          downloadedPage.stored.height,
           timestamp,
           timestamp,
         );
