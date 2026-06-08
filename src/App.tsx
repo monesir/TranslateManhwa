@@ -133,11 +133,11 @@ function statusClass(status: string) {
 
 const genderOptions: Gender[] = ["Male", "Female", "Unknown"];
 const ocrLanguageOptions = [
+  ["english", "English"],
   ["", "Auto"],
   ["korean", "Korean"],
   ["japanese", "Japanese"],
   ["chinese", "Chinese"],
-  ["english", "English"],
   ["arabic", "Arabic"],
 ] as const;
 const sourceStatusOptions: OcrSourceStatus[] = [
@@ -2120,7 +2120,7 @@ function TranslationPage() {
   const [viewerMode, setViewerMode] = useState<"page" | "webtoon">("page");
   const [mergePages, setMergePages] = useState(false);
   const [ocrProviderId, setOcrProviderId] = useState<OcrProviderId>("windows");
-  const [ocrLanguageHint, setOcrLanguageHint] = useState("");
+  const [ocrLanguageHint, setOcrLanguageHint] = useState("english");
   const [replaceOcrText, setReplaceOcrText] = useState(true);
   const [ocrSelection, setOcrSelection] = useState<OcrSelectionState | null>(null);
   const {

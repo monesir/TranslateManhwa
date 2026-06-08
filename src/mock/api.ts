@@ -316,7 +316,7 @@ export async function listOcrProviders(languageHint = ""): Promise<OcrProviderSt
       engine: "mock",
       id: "windows",
       kind: "local",
-      label: "Windows OCR",
+      label: "Windows OCR (Recommended)",
       reason: null,
       setup: "Electron runtime required for real OCR.",
       supportsRegions: true,

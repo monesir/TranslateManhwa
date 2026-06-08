@@ -13,7 +13,7 @@ const DEFAULT_TESSDATA_LANGUAGES = ["ara", "chi_sim", "chi_tra", "eng", "jpn", "
 const OCR_PROVIDERS = [
   {
     id: "windows",
-    label: "Windows OCR",
+    label: "Windows OCR (Recommended)",
     engine: "windows-media-ocr",
     kind: "local",
     supportsRegions: true,
