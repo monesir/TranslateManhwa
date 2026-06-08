@@ -32,6 +32,10 @@ function createAppApi(db, options = {}) {
       return projectRepository.listLibraryProjects();
     },
 
+    createProject(input) {
+      return projectRepository.createProject(input);
+    },
+
     getLibraryStats() {
       return projectRepository.getLibraryStats();
     },

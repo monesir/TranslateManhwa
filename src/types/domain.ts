@@ -78,6 +78,17 @@ export interface Project {
   progress: number;
 }
 
+export interface CreateProjectInput {
+  title: string;
+  originalTitle?: string;
+  arabicTitle?: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  genres: string[];
+  description?: string;
+  contextSummary?: string;
+}
+
 export interface LibraryStats {
   lastWorkedChapter: string;
   lastModifiedAt: string;

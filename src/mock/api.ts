@@ -3,6 +3,7 @@ import type {
   Character,
   CharacterAlias,
   CharacterInput,
+  CreateProjectInput,
   GlossaryTermInput,
   ExplorerSeriesDetails,
   GlossaryTerm,
@@ -33,6 +34,17 @@ import {
 let mutableTextUnits: TextUnit[] = [...textUnits];
 let mutableCharacters: Character[] = [...characters];
 let mutableGlossaryTerms: GlossaryTerm[] = [...glossaryTerms];
+let mutableProjects: Project[] = [...projects];
+let mutableProjectOverviews: ProjectOverview[] = [...projectOverviews];
+
+function slugify(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 96) || "untitled";
+}
 
 function listMockCategories(projectId: string) {
   const categories = new Set<string>();
@@ -51,7 +63,39 @@ const delay = <T>(value: T, ms = 120): Promise<T> =>
 
 export async function listProjects(): Promise<Project[]> {
   if (window.florisApi) return window.florisApi.listProjects();
-  return delay(projects);
+  return delay(mutableProjects);
+}
+
+export async function createProject(input: CreateProjectInput): Promise<Project> {
+  if (window.florisApi) return window.florisApi.createProject(input);
+
+  const timestamp = new Date().toISOString();
+  const slug = slugify(input.title);
+  const project: Project = {
+    id: `project_${slug}_${Date.now()}`,
+    title: input.title,
+    arabicTitle: input.arabicTitle || undefined,
+    originalTitle: input.originalTitle || input.title,
+    sourceLanguage: input.sourceLanguage || "English",
+    targetLanguage: input.targetLanguage || "Arabic",
+    coverTone: "steel",
+    coverUrl: null,
+    status: "Active",
+    lastModifiedAt: timestamp,
+    progress: 0,
+  };
+  const overview: ProjectOverview = {
+    ...project,
+    chaptersCount: 0,
+    charactersCount: 0,
+    generalTermsCount: 0,
+    contextSummary: input.contextSummary || input.description || "",
+    genres: input.genres,
+  };
+
+  mutableProjects = [project, ...mutableProjects];
+  mutableProjectOverviews = [overview, ...mutableProjectOverviews];
+  return delay(project);
 }
 
 export async function getLibraryStats(): Promise<LibraryStats> {
@@ -140,7 +184,7 @@ export async function prepareLibraryChapter(
 
 export async function getProjectOverview(projectId: string): Promise<ProjectOverview | undefined> {
   if (window.florisApi) return window.florisApi.getProjectOverview(projectId);
-  return delay(projectOverviews.find((project) => project.id === projectId));
+  return delay(mutableProjectOverviews.find((project) => project.id === projectId));
 }
 
 export async function listProjectChapters(projectId: string) {

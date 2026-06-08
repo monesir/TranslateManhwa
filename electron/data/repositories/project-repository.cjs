@@ -1,8 +1,122 @@
 const { mapProjectRow, parseJson } = require("./mappers.cjs");
 
+function slugify(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 96) || "untitled";
+}
+
+function cleanString(value) {
+  const normalized = String(value ?? "").trim();
+  return normalized || null;
+}
+
+function normalizeGenres(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean)
+    .filter((item, index, array) => array.indexOf(item) === index)
+    .slice(0, 40);
+}
+
 class ProjectRepository {
   constructor(db) {
     this.db = db;
+  }
+
+  uniqueManualProjectIdentity(title) {
+    const baseSlug = slugify(title);
+
+    for (let index = 0; index < 10_000; index += 1) {
+      const suffix = index === 0 ? "" : `-${index + 1}`;
+      const slug = `${baseSlug}${suffix}`;
+      const id = `project_${slug}`.slice(0, 140);
+      const existing = this.db.prepare(`
+        SELECT id FROM projects
+        WHERE id = ? OR slug = ?
+        LIMIT 1
+      `).get(id, slug);
+
+      if (!existing) return { id, slug };
+    }
+
+    throw new Error("Could not allocate a unique project id");
+  }
+
+  createProject(input) {
+    const title = cleanString(input?.title);
+    if (!title) {
+      throw new Error("Project title is required");
+    }
+
+    const originalTitle = cleanString(input?.originalTitle) ?? title;
+    const arabicTitle = cleanString(input?.arabicTitle);
+    const sourceLanguage = cleanString(input?.sourceLanguage) ?? "English";
+    const targetLanguage = cleanString(input?.targetLanguage) ?? "Arabic";
+    const description = cleanString(input?.description);
+    const contextSummary = cleanString(input?.contextSummary) ?? description ?? "";
+    const genres = normalizeGenres(input?.genres);
+    const timestamp = new Date().toISOString();
+    const { id, slug } = this.uniqueManualProjectIdentity(title);
+
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare(`
+        INSERT INTO projects (
+          id, slug, title, arabic_title, original_title, source_language,
+          target_language, cover_asset_id, status, last_worked_chapter_id,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'Active', NULL, ?, ?)
+      `).run(
+        id,
+        slug,
+        title,
+        arabicTitle,
+        originalTitle,
+        sourceLanguage,
+        targetLanguage,
+        timestamp,
+        timestamp,
+      );
+
+      this.db.prepare(`
+        INSERT INTO project_metadata (
+          project_id, author, artist, description, genres_json, external_status, start_year
+        ) VALUES (?, NULL, NULL, ?, ?, NULL, NULL)
+      `).run(id, description, JSON.stringify(genres));
+
+      this.db.prepare(`
+        INSERT INTO project_contexts (project_id, markdown, summary, updated_at)
+        VALUES (?, ?, ?, ?)
+      `).run(
+        id,
+        contextSummary ? `# Work Context\n\n${contextSummary}` : "# Work Context",
+        contextSummary,
+        timestamp,
+      );
+
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    const row = this.db.prepare(`
+      SELECT
+        p.*,
+        NULL AS last_worked_chapter_label,
+        NULL AS cover_asset_path,
+        NULL AS cover_metadata_json,
+        0 AS progress
+      FROM projects p
+      WHERE p.id = ?
+    `).get(id);
+
+    return mapProjectRow(row);
   }
 
   listLibraryProjects() {

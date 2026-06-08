@@ -3,6 +3,7 @@ import type {
   Character,
   CharacterAlias,
   CharacterInput,
+  CreateProjectInput,
   GlossaryTermInput,
   GlossaryTerm,
   LibraryStats,
@@ -20,6 +21,7 @@ import type {
 
 interface FlorisApi {
   listProjects(): Promise<Project[]>;
+  createProject(input: CreateProjectInput): Promise<Project>;
   getLibraryStats(): Promise<LibraryStats>;
   getProjectOverview(projectId: string): Promise<ProjectOverview | undefined>;
   listProjectChapters(projectId: string): Promise<import("./domain").Chapter[]>;

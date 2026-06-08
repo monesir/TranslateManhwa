@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("floris", {
 
 contextBridge.exposeInMainWorld("florisApi", {
   listProjects: invoke("data:listProjects"),
+  createProject: invoke("data:createProject"),
   getLibraryStats: invoke("data:getLibraryStats"),
   getProjectOverview: invoke("data:getProjectOverview"),
   listProjectChapters: invoke("data:listProjectChapters"),

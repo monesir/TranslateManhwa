@@ -54,6 +54,7 @@ import {
   addCharacter,
   addGlossaryTerm,
   browseSourceTitles,
+  createProject,
   deleteCharacter,
   deleteGlossaryTerm,
   ensureSourceProject,
@@ -80,6 +81,7 @@ import type {
   Character,
   CharacterAliasInput,
   CharacterInput,
+  CreateProjectInput,
   Gender,
   GlossaryTermInput,
   GlossaryTerm,
@@ -120,6 +122,30 @@ interface TermFormState {
   arabicTerm: string;
   category: string;
   description: string;
+}
+
+interface CreateProjectFormState {
+  title: string;
+  originalTitle: string;
+  arabicTitle: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  genres: string;
+  description: string;
+  contextSummary: string;
+}
+
+function defaultCreateProjectForm(): CreateProjectFormState {
+  return {
+    title: "",
+    originalTitle: "",
+    arabicTitle: "",
+    sourceLanguage: "English",
+    targetLanguage: "Arabic",
+    genres: "",
+    description: "",
+    contextSummary: "",
+  };
 }
 
 function createEmptyCharacterForm(): CharacterFormState {
@@ -440,8 +466,45 @@ function AppShell() {
 }
 
 function LibraryPage() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
+  const [projectForm, setProjectForm] = useState<CreateProjectFormState>(
+    defaultCreateProjectForm,
+  );
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: listProjects });
   const statsQuery = useQuery({ queryKey: ["library-stats"], queryFn: getLibraryStats });
+  const createProjectMutation = useMutation({
+    mutationFn: (input: CreateProjectInput) => createProject(input),
+    onSuccess: (project) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["library-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", project.id] });
+      setProjectForm(defaultCreateProjectForm());
+      setIsCreateProjectOpen(false);
+      navigate(`/projects/${project.id}`);
+    },
+  });
+
+  function submitProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const title = projectForm.title.trim();
+    if (!title) return;
+
+    createProjectMutation.mutate({
+      title,
+      originalTitle: projectForm.originalTitle.trim() || title,
+      arabicTitle: projectForm.arabicTitle.trim() || undefined,
+      sourceLanguage: projectForm.sourceLanguage.trim() || "English",
+      targetLanguage: projectForm.targetLanguage.trim() || "Arabic",
+      genres: projectForm.genres
+        .split(",")
+        .map((genre) => genre.trim())
+        .filter(Boolean),
+      description: projectForm.description.trim() || undefined,
+      contextSummary: projectForm.contextSummary.trim() || undefined,
+    });
+  }
 
   if (projectsQuery.isLoading || statsQuery.isLoading) {
     return <LoadingPanel label="Loading library" />;
@@ -462,7 +525,7 @@ function LibraryPage() {
             <Filter size={16} />
             Filter
           </button>
-          <button className="button primary">
+          <button className="button primary" onClick={() => setIsCreateProjectOpen(true)}>
             <Plus size={16} />
             New project
           </button>
@@ -492,7 +555,137 @@ function LibraryPage() {
           <ProjectCard key={project.id} project={project} />
         ))}
       </div>
+
+      {isCreateProjectOpen ? (
+        <CreateProjectDialog
+          error={
+            createProjectMutation.error instanceof Error
+              ? createProjectMutation.error.message
+              : null
+          }
+          form={projectForm}
+          isSaving={createProjectMutation.isPending}
+          onChange={setProjectForm}
+          onClose={() => {
+            if (!createProjectMutation.isPending) {
+              setIsCreateProjectOpen(false);
+            }
+          }}
+          onSubmit={submitProject}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function CreateProjectDialog({
+  error,
+  form,
+  isSaving,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  error: string | null;
+  form: CreateProjectFormState;
+  isSaving: boolean;
+  onChange: (form: CreateProjectFormState) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <form
+        className="modal-card create-project-dialog"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={onSubmit}
+      >
+        <div className="modal-head">
+          <div>
+            <p className="eyebrow">Library</p>
+            <h2>New project</h2>
+          </div>
+          <button className="icon-button" onClick={onClose} type="button" title="Close">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="editor-grid create-project-grid">
+          <label className="form-field">
+            <span>Project name</span>
+            <input
+              autoFocus
+              required
+              value={form.title}
+              onChange={(event) => onChange({ ...form, title: event.target.value })}
+            />
+          </label>
+          <label className="form-field">
+            <span>Original title</span>
+            <input
+              value={form.originalTitle}
+              onChange={(event) => onChange({ ...form, originalTitle: event.target.value })}
+            />
+          </label>
+          <label className="form-field">
+            <span>Arabic title</span>
+            <input
+              dir="rtl"
+              value={form.arabicTitle}
+              onChange={(event) => onChange({ ...form, arabicTitle: event.target.value })}
+            />
+          </label>
+          <label className="form-field">
+            <span>Source language</span>
+            <input
+              value={form.sourceLanguage}
+              onChange={(event) => onChange({ ...form, sourceLanguage: event.target.value })}
+            />
+          </label>
+          <label className="form-field">
+            <span>Target language</span>
+            <input
+              value={form.targetLanguage}
+              onChange={(event) => onChange({ ...form, targetLanguage: event.target.value })}
+            />
+          </label>
+          <label className="form-field">
+            <span>Genres</span>
+            <input
+              placeholder="Action, Fantasy"
+              value={form.genres}
+              onChange={(event) => onChange({ ...form, genres: event.target.value })}
+            />
+          </label>
+          <label className="form-field full">
+            <span>Description</span>
+            <textarea
+              value={form.description}
+              onChange={(event) => onChange({ ...form, description: event.target.value })}
+            />
+          </label>
+          <label className="form-field full">
+            <span>Work context</span>
+            <textarea
+              value={form.contextSummary}
+              onChange={(event) => onChange({ ...form, contextSummary: event.target.value })}
+            />
+          </label>
+        </div>
+
+        {error ? <p className="error-line">{error}</p> : null}
+
+        <div className="form-actions">
+          <button className="button primary" disabled={isSaving} type="submit">
+            <Save size={16} />
+            {isSaving ? "Creating" : "Create project"}
+          </button>
+          <button className="button secondary" disabled={isSaving} onClick={onClose} type="button">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -520,7 +713,7 @@ function ProjectCard({ project }: { project: Project }) {
         </div>
         <div className="meta-grid">
           <span>Last chapter</span>
-          <strong>{project.lastWorkedChapterLabel}</strong>
+          <strong>{project.lastWorkedChapterLabel ?? "None"}</strong>
           <span>Last modified</span>
           <strong>{formatDate(project.lastModifiedAt)}</strong>
           <span>Language</span>

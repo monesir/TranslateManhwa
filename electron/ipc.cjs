@@ -3,6 +3,7 @@ const { ipcMain } = require("electron");
 function registerIpcHandlers(appApi) {
   const handlers = {
     "data:listProjects": () => appApi.listProjects(),
+    "data:createProject": (_event, input) => appApi.createProject(input),
     "data:getLibraryStats": () => appApi.getLibraryStats(),
     "data:getProjectOverview": (_event, projectId) => appApi.getProjectOverview(projectId),
     "data:listProjectChapters": (_event, projectId) => appApi.listProjectChapters(projectId),
