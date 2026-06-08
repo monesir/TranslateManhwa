@@ -62,6 +62,7 @@ class SourceImportRepository {
   constructor(db, options = {}) {
     this.db = db;
     this.coverCache = options.coverCache;
+    this.chapterPageStore = options.chapterPageStore;
   }
 
   findProject(sourceId, titleId) {
@@ -361,6 +362,92 @@ class SourceImportRepository {
     }
   }
 
+  setChapterDownloadState(chapterId, status, errorMessage = null, downloadedAt = null) {
+    const timestamp = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE chapters
+      SET download_status = ?,
+          download_error = ?,
+          downloaded_at = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(status, errorMessage, downloadedAt, timestamp, chapterId);
+  }
+
+  isChapterDownloaded(chapterId) {
+    const row = this.db.prepare(`
+      SELECT
+        COUNT(p.id) AS total_pages,
+        SUM(CASE WHEN a.path LIKE 'floris-cache://pages/%' THEN 1 ELSE 0 END) AS local_pages
+      FROM pages p
+      JOIN assets a ON a.id = p.asset_id
+      WHERE p.chapter_id = ?
+    `).get(chapterId);
+
+    const totalPages = Number(row?.total_pages ?? 0);
+    const localPages = Number(row?.local_pages ?? 0);
+    return totalPages > 0 && totalPages === localPages;
+  }
+
+  async downloadChapterPages(projectId, chapterId, pages, timestamp) {
+    if (!this.chapterPageStore) {
+      throw new Error("Chapter page storage is not configured");
+    }
+
+    const jobs = pages.map((page, index) => {
+      const pageIndex = Number(page.pageIndex ?? index) + 1;
+      const padded = String(pageIndex).padStart(4, "0");
+      const assetId = `asset_${chapterId}_page_${padded}`;
+      const pageId = `page_${chapterId}_${padded}`;
+
+      return {
+        assetId,
+        page,
+        pageId,
+        pageIndex,
+        tone: index % 2 === 0 ? "night" : "gate",
+      };
+    });
+
+    const downloadedPages = new Array(jobs.length);
+    let cursor = 0;
+    const workerCount = Math.min(4, jobs.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (cursor < jobs.length) {
+        const jobIndex = cursor;
+        cursor += 1;
+        const job = jobs[jobIndex];
+        const stored = await this.chapterPageStore.savePage({
+          assetId: job.assetId,
+          chapterId,
+          pageIndex: job.pageIndex,
+          projectId,
+          sourceUrl: job.page.imageUrl,
+        });
+
+        downloadedPages[jobIndex] = {
+          ...job,
+          stored,
+          metadata: {
+            tone: job.tone,
+            sourceImageUrl: job.page.imageUrl,
+            download: {
+              status: "downloaded",
+              updatedAt: timestamp,
+              relativePath: stored.relativePath,
+              sizeBytes: stored.sizeBytes,
+              mimeType: stored.mimeType,
+              reused: stored.reused,
+            },
+          },
+        };
+      }
+    });
+
+    await Promise.all(workers);
+    return downloadedPages;
+  }
+
   async prepareChapter(sourceId, sourceResult, sourceChapter, pages) {
     if (!Array.isArray(pages) || pages.length === 0) {
       throw new Error("No readable pages were returned for this chapter");
@@ -370,29 +457,62 @@ class SourceImportRepository {
     const timestamp = new Date().toISOString();
     const chapterId = sourceChapterId(project.projectId, sourceChapter.chapterId);
 
+    if (this.isChapterDownloaded(chapterId)) {
+      const chapterRow = this.db.prepare(`
+        SELECT
+          c.*,
+          COUNT(DISTINCT p.id) AS pages_count,
+          COUNT(DISTINCT tu.id) AS text_units_count,
+          0 AS progress
+        FROM chapters c
+        LEFT JOIN pages p ON p.chapter_id = c.id
+        LEFT JOIN text_units tu ON tu.chapter_id = c.id
+        WHERE c.id = ?
+        GROUP BY c.id
+      `).get(chapterId);
+
+      return {
+        projectId: project.projectId,
+        chapterId,
+        pagesCount: Number(chapterRow?.pages_count ?? 0),
+        chapter: mapChapterRow(chapterRow),
+      };
+    }
+
+    this.setChapterDownloadState(chapterId, "Downloading");
+
+    let downloadedPages;
+    try {
+      downloadedPages = await this.downloadChapterPages(project.projectId, chapterId, pages, timestamp);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.setChapterDownloadState(chapterId, "Failed", message);
+      throw error;
+    }
+    const downloadedAt = new Date().toISOString();
+
     this.db.exec("BEGIN");
     try {
       this.ensureChapters(project.projectId, [sourceChapter], timestamp);
 
-      pages.forEach((page, index) => {
-        const pageIndex = Number(page.pageIndex ?? index) + 1;
-        const padded = String(pageIndex).padStart(4, "0");
-        const assetId = `asset_${chapterId}_page_${padded}`;
-        const pageId = `page_${chapterId}_${padded}`;
-
+      for (const downloadedPage of downloadedPages) {
         this.db.prepare(`
           INSERT INTO assets (
             id, project_id, kind, path, mime_type, width, height, size_bytes,
             checksum, metadata_json, created_at
-          ) VALUES (?, ?, 'page', ?, NULL, 820, 1240, NULL, NULL, ?, ?)
+          ) VALUES (?, ?, 'page', ?, ?, 820, 1240, ?, NULL, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             path = excluded.path,
+            mime_type = excluded.mime_type,
+            size_bytes = excluded.size_bytes,
             metadata_json = excluded.metadata_json
         `).run(
-          assetId,
+          downloadedPage.assetId,
           project.projectId,
-          page.imageUrl,
-          JSON.stringify({ tone: index % 2 === 0 ? "night" : "gate", sourceImageUrl: page.imageUrl }),
+          downloadedPage.stored.cacheUrl,
+          downloadedPage.stored.mimeType,
+          downloadedPage.stored.sizeBytes,
+          JSON.stringify(downloadedPage.metadata),
           timestamp,
         );
 
@@ -404,16 +524,26 @@ class SourceImportRepository {
             asset_id = excluded.asset_id,
             page_index = excluded.page_index,
             updated_at = excluded.updated_at
-        `).run(pageId, chapterId, assetId, pageIndex, timestamp, timestamp);
-      });
+        `).run(
+          downloadedPage.pageId,
+          chapterId,
+          downloadedPage.assetId,
+          downloadedPage.pageIndex,
+          timestamp,
+          timestamp,
+        );
+      }
 
       this.db.prepare(`
         UPDATE chapters
         SET status = 'In Progress',
             internal_status = 'Images Ready',
+            download_status = 'Downloaded',
+            download_error = NULL,
+            downloaded_at = ?,
             updated_at = ?
         WHERE id = ?
-      `).run(timestamp, chapterId);
+      `).run(downloadedAt, timestamp, chapterId);
 
       this.db.prepare(`
         UPDATE projects

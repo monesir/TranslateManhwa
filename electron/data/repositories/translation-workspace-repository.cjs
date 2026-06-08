@@ -31,13 +31,25 @@ class TranslationWorkspaceRepository {
     `).get(chapter.projectId);
 
     const project = mapProjectRow(projectRow);
-    const pages = this.db.prepare(`
-      SELECT p.*, a.path AS asset_path, a.metadata_json AS asset_metadata_json
+    const pageState = this.db.prepare(`
+      SELECT
+        COUNT(p.id) AS total_pages,
+        SUM(CASE WHEN a.path LIKE 'floris-cache://pages/%' THEN 1 ELSE 0 END) AS local_pages
       FROM pages p
       JOIN assets a ON a.id = p.asset_id
       WHERE p.chapter_id = ?
-      ORDER BY p.page_index ASC
-    `).all(chapterId).map(mapPageRow);
+    `).get(chapterId);
+    const totalPages = Number(pageState?.total_pages ?? 0);
+    const localPages = Number(pageState?.local_pages ?? 0);
+    const pages = totalPages > 0 && totalPages === localPages
+      ? this.db.prepare(`
+          SELECT p.*, a.path AS asset_path, a.metadata_json AS asset_metadata_json
+          FROM pages p
+          JOIN assets a ON a.id = p.asset_id
+          WHERE p.chapter_id = ?
+          ORDER BY p.page_index ASC
+        `).all(chapterId).map(mapPageRow)
+      : [];
 
     const textUnits = this.db.prepare(`
       SELECT

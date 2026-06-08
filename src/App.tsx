@@ -420,6 +420,10 @@ function AppShell() {
           <Route path="/" element={<Navigate to="/library" replace />} />
           <Route path="/library" element={<LibraryPage />} />
           <Route path="/explorer" element={<ExplorerPage />} />
+          <Route
+            path="/explorer/:sourceId/:titleId/chapters/:chapterId/read"
+            element={<ReaderPage />}
+          />
           <Route path="/explorer/:sourceId/:titleId" element={<ExplorerDetailsPage />} />
           <Route path="/explorer/:externalSeriesId" element={<ExplorerDetailsPage />} />
           <Route path="/projects/:projectId" element={<ProjectPage />} />
@@ -764,7 +768,7 @@ function ExplorerDetailsPage() {
       queryClient.invalidateQueries({ queryKey: ["project-overview", result.projectId] });
       queryClient.invalidateQueries({ queryKey: ["project-chapters", result.projectId] });
       queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
-      navigate(`/projects/${result.projectId}/chapters/${result.chapterId}/read`);
+      navigate(`/projects/${result.projectId}/chapters/${result.chapterId}/translate`);
     },
   });
 
@@ -822,7 +826,7 @@ function ExplorerDetailsPage() {
               <p className="error-line">
                 {prepareChapterMutation.error instanceof Error
                   ? prepareChapterMutation.error.message
-                  : "Could not prepare chapter"}
+                  : "Could not download chapter"}
               </p>
             ) : null}
           </div>
@@ -838,11 +842,16 @@ function ExplorerDetailsPage() {
               <SourceChapterRow
                 chapter={chapter}
                 key={chapter.chapterId}
-                isPreparing={
+                isDownloading={
                   prepareChapterMutation.isPending &&
                   prepareChapterMutation.variables === chapter.chapterId
                 }
-                onPrepare={() => prepareChapterMutation.mutate(chapter.chapterId)}
+                onDownload={() => prepareChapterMutation.mutate(chapter.chapterId)}
+                onRead={() =>
+                  navigate(
+                    `/explorer/${encodeURIComponent(sourceId)}/${encodeURIComponent(titleId)}/chapters/${encodeURIComponent(chapter.chapterId)}/read`,
+                  )
+                }
               />
             ))}
           </div>
@@ -904,26 +913,51 @@ function ExplorerDetailsPage() {
 
 function SourceChapterRow({
   chapter,
-  isPreparing,
-  onPrepare,
+  isDownloading,
+  onDownload,
+  onRead,
 }: {
   chapter: SourceChapterSummary;
-  isPreparing: boolean;
-  onPrepare: () => void;
+  isDownloading: boolean;
+  onDownload: () => void;
+  onRead: () => void;
 }) {
+  const isReadable = chapter.availability === "readable";
+
   return (
-    <button
-      className="chapter-row chapter-row-button"
-      type="button"
-      disabled={chapter.availability !== "readable" || isPreparing}
-      onClick={onPrepare}
+    <div
+      className={isReadable ? "chapter-row chapter-row-button source-chapter-row" : "chapter-row chapter-row-button source-chapter-row is-disabled"}
+      role="button"
+      tabIndex={isReadable ? 0 : -1}
+      onClick={() => {
+        if (isReadable) onRead();
+      }}
+      onKeyDown={(event) => {
+        if (!isReadable) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onRead();
+        }
+      }}
     >
       <strong>{chapter.chapterNumber == null ? "Chapter" : `Chapter ${chapter.chapterNumber}`}</strong>
       <span>{chapter.title || "Untitled"}</span>
       <span className={`status-chip ${statusClass(chapter.availability)}`}>
-        {isPreparing ? "Loading" : chapter.availabilityLabel ?? chapter.availability}
+        {chapter.availabilityLabel ?? chapter.availability}
       </span>
-    </button>
+      <button
+        className="icon-button source-download-button"
+        disabled={!isReadable || isDownloading}
+        onClick={(event) => {
+          event.stopPropagation();
+          onDownload();
+        }}
+        title="Download chapter for translation"
+        type="button"
+      >
+        {isDownloading ? <RefreshCw className="spin" size={15} /> : <Download size={15} />}
+      </button>
+    </div>
   );
 }
 
@@ -1044,7 +1078,7 @@ function ChaptersTab({ projectId }: { projectId: string }) {
         <p className="error-line">
           {prepareChapterMutation.error instanceof Error
             ? prepareChapterMutation.error.message
-            : "Could not prepare chapter"}
+            : "Could not download chapter"}
         </p>
       ) : null}
       <div className="chapter-list">
@@ -1083,7 +1117,13 @@ function ChapterRow({
       <strong>{chapter.displayLabel}</strong>
       <span>{chapter.title ?? "Untitled"}</span>
       <span className={`status-chip ${statusClass(chapter.status)}`}>{chapter.status}</span>
-      <span className="internal-status">{isPreparing ? "Preparing pages" : chapter.internalStatus}</span>
+      <span
+        className={`status-chip ${statusClass(isPreparing ? "Downloading" : chapter.downloadStatus)}`}
+        title={chapter.downloadError ?? chapter.downloadStatus}
+      >
+        {isPreparing ? "Downloading" : chapter.downloadStatus}
+      </span>
+      <span className="internal-status">{chapter.internalStatus}</span>
       <span>{chapter.pagesCount} pages</span>
       <span>{chapter.textUnitsCount} text units</span>
       <div className="row-progress">

@@ -138,4 +138,9 @@ module.exports = {
   COVER_CACHE_HOST,
   COVER_CACHE_SCHEME,
   CoverCache,
+  IMAGE_HEADERS,
+  extensionFromContentType,
+  extensionFromUrl,
+  mimeTypeFromExtension,
+  sanitizeFilePart,
 };

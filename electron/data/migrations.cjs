@@ -370,6 +370,63 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 4,
+    name: "chapter_download_state",
+    up(db) {
+      const columns = db.prepare("PRAGMA table_info(chapters)").all();
+      const hasDownloadStatus = columns.some((column) => column.name === "download_status");
+      const hasDownloadError = columns.some((column) => column.name === "download_error");
+      const hasDownloadedAt = columns.some((column) => column.name === "downloaded_at");
+
+      if (!hasDownloadStatus) {
+        db.exec(`
+          ALTER TABLE chapters
+          ADD COLUMN download_status TEXT NOT NULL DEFAULT 'Not Downloaded'
+            CHECK (download_status IN ('Not Downloaded', 'Downloading', 'Downloaded', 'Failed'));
+        `);
+      }
+
+      if (!hasDownloadError) {
+        db.exec(`
+          ALTER TABLE chapters
+          ADD COLUMN download_error TEXT;
+        `);
+      }
+
+      if (!hasDownloadedAt) {
+        db.exec(`
+          ALTER TABLE chapters
+          ADD COLUMN downloaded_at TEXT;
+        `);
+      }
+
+      db.exec(`
+        UPDATE chapters
+        SET download_status = 'Downloaded',
+            downloaded_at = COALESCE(downloaded_at, updated_at),
+            download_error = NULL
+        WHERE EXISTS (
+          SELECT 1
+          FROM pages p
+          JOIN assets a ON a.id = p.asset_id
+          WHERE p.chapter_id = chapters.id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pages p
+          JOIN assets a ON a.id = p.asset_id
+          WHERE p.chapter_id = chapters.id
+            AND a.path NOT LIKE 'floris-cache://pages/%'
+        );
+      `);
+
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chapters_download_status
+          ON chapters(project_id, download_status);
+      `);
+    },
+  },
 ];
 
 function ensureMigrationTable(db) {

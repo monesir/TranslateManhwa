@@ -2,6 +2,7 @@ const { app, BrowserWindow, protocol, shell, session } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 const { createAppApi } = require("./application/app-api.cjs");
+const { PAGE_CACHE_HOST } = require("./data/chapter-page-store.cjs");
 const { COVER_CACHE_HOST, COVER_CACHE_SCHEME } = require("./data/cover-cache.cjs");
 const { createDatabase } = require("./data/database.cjs");
 const { registerIpcHandlers } = require("./ipc.cjs");
@@ -50,23 +51,39 @@ function imageContentType(filePath) {
 
 function installCacheProtocol(workspacePath) {
   const coversPath = path.resolve(workspacePath, "cache", "covers");
-  const coversRoot = coversPath.endsWith(path.sep) ? coversPath : `${coversPath}${path.sep}`;
-  const coversRootKey = coversRoot.toLowerCase();
+  const workspaceRoot = path.resolve(workspacePath);
 
   protocol.handle(COVER_CACHE_SCHEME, async (request) => {
     try {
       const requestUrl = new URL(request.url);
-      if (requestUrl.hostname !== COVER_CACHE_HOST) {
+      const hostRoot =
+        requestUrl.hostname === COVER_CACHE_HOST
+          ? coversPath
+          : requestUrl.hostname === PAGE_CACHE_HOST
+            ? workspaceRoot
+            : null;
+
+      if (!hostRoot) {
         return new Response("Not found", { status: 404 });
       }
 
-      const fileName = decodeURIComponent(requestUrl.pathname.replace(/^\/+/, ""));
-      if (!fileName || fileName.includes("/") || fileName.includes("\\")) {
+      const pathParts = requestUrl.pathname
+        .split("/")
+        .filter(Boolean)
+        .map((part) => decodeURIComponent(part));
+
+      if (
+        pathParts.length === 0 ||
+        pathParts.some(
+          (part) => !part || part === "." || part === ".." || part.includes("/") || part.includes("\\"),
+        )
+      ) {
         return new Response("Bad cache path", { status: 400 });
       }
 
-      const filePath = path.resolve(coversPath, fileName);
-      if (!filePath.toLowerCase().startsWith(coversRootKey)) {
+      const filePath = path.resolve(hostRoot, ...pathParts);
+      const rootWithSeparator = hostRoot.endsWith(path.sep) ? hostRoot : `${hostRoot}${path.sep}`;
+      if (!filePath.toLowerCase().startsWith(rootWithSeparator.toLowerCase())) {
         return new Response("Forbidden", { status: 403 });
       }
 

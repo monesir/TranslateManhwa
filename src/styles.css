@@ -599,6 +599,26 @@ h3 {
   color: #aeb6bb;
 }
 
+.status-chip.downloaded {
+  border-color: rgba(101, 168, 111, 0.35);
+  color: #8ecb96;
+}
+
+.status-chip.downloading {
+  border-color: rgba(58, 163, 159, 0.38);
+  color: #78cbc7;
+}
+
+.status-chip.failed {
+  border-color: rgba(209, 100, 100, 0.35);
+  color: #dfa1a1;
+}
+
+.status-chip.not-downloaded {
+  border-color: rgba(153, 163, 170, 0.32);
+  color: #aeb6bb;
+}
+
 .meta-grid {
   display: grid;
   grid-template-columns: 112px 1fr;
@@ -799,7 +819,7 @@ h3 {
 
 .chapter-row {
   display: grid;
-  grid-template-columns: 100px minmax(120px, 1fr) 112px 138px 86px 104px 138px;
+  grid-template-columns: 100px minmax(120px, 1fr) 112px 128px 126px 86px 104px 138px;
   align-items: center;
   gap: 10px;
   min-height: 48px;
@@ -837,12 +857,25 @@ h3 {
   opacity: 0.62;
 }
 
+.chapter-row-button.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .chapter-list.compact .chapter-row {
   grid-template-columns: 110px 1fr 120px;
 }
 
 .source-chapters .chapter-row {
-  grid-template-columns: 126px minmax(0, 1fr) 120px;
+  grid-template-columns: 126px minmax(0, 1fr) 120px 40px;
+}
+
+.source-chapter-row {
+  user-select: none;
+}
+
+.source-download-button {
+  justify-self: end;
 }
 
 .chapter-row strong {

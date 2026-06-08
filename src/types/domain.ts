@@ -11,6 +11,12 @@ export type ChapterInternalStatus =
   | "Typeset"
   | "Completed";
 
+export type ChapterDownloadStatus =
+  | "Not Downloaded"
+  | "Downloading"
+  | "Downloaded"
+  | "Failed";
+
 export type Gender = "Male" | "Female" | "Unknown";
 
 export type ReviewStatus = "Not Reviewed" | "Needs Review" | "Approved";
@@ -208,6 +214,9 @@ export interface Chapter {
   displayLabel: string;
   status: ChapterStatus;
   internalStatus: ChapterInternalStatus;
+  downloadStatus: ChapterDownloadStatus;
+  downloadError?: string;
+  downloadedAt?: string;
   pagesCount: number;
   textUnitsCount: number;
   progress: number;

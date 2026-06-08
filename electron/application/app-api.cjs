@@ -1,5 +1,6 @@
 const { ProjectRepository } = require("../data/repositories/project-repository.cjs");
 const { ChapterRepository } = require("../data/repositories/chapter-repository.cjs");
+const { ChapterPageStore } = require("../data/chapter-page-store.cjs");
 const { CoverCache } = require("../data/cover-cache.cjs");
 const { DictionaryRepository } = require("../data/repositories/dictionary-repository.cjs");
 const {
@@ -22,7 +23,8 @@ function createAppApi(db, options = {}) {
   const chapterRepository = new ChapterRepository(db);
   const dictionaryRepository = new DictionaryRepository(db);
   const coverCache = options.workspacePath ? new CoverCache(options.workspacePath) : null;
-  const sourceImportRepository = new SourceImportRepository(db, { coverCache });
+  const chapterPageStore = options.workspacePath ? new ChapterPageStore(options.workspacePath) : null;
+  const sourceImportRepository = new SourceImportRepository(db, { chapterPageStore, coverCache });
   const translationWorkspaceRepository = new TranslationWorkspaceRepository(db);
 
   return {
@@ -129,12 +131,13 @@ function createAppApi(db, options = {}) {
         throw new Error(`Chapter not found: ${chapterId}`);
       }
 
-      if (chapter.pagesCount > 0) {
+      if (sourceImportRepository.isChapterDownloaded(chapterId)) {
+        const downloadedChapter = chapterRepository.getChapter(chapterId);
         return {
           projectId: chapter.projectId,
           chapterId: chapter.id,
-          pagesCount: chapter.pagesCount,
-          chapter,
+          pagesCount: downloadedChapter.pagesCount,
+          chapter: downloadedChapter,
         };
       }
 
