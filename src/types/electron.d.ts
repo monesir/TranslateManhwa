@@ -14,6 +14,7 @@ import type {
   OcrRunResult,
   Project,
   ProjectOverview,
+  ChapterTextSizeInput,
   SourceCatalogItem,
   SourceChapterPreparationResult,
   SourceChapterPage,
@@ -22,6 +23,7 @@ import type {
   SourceTitleDetailsResult,
   SourceTitleSummary,
   TextUnit,
+  TextUnitTypesettingInput,
   UpdateTextUnitSourceInput,
 } from "./domain";
 
@@ -50,6 +52,14 @@ interface FlorisApi {
   updateTextUnitSource(textUnitId: string, input: UpdateTextUnitSourceInput): Promise<TextUnit>;
   updateFinalTranslation(textUnitId: string, text: string): Promise<TextUnit>;
   deleteTextUnit(textUnitId: string): Promise<{ chapterId: string; id: string }>;
+  updateTextUnitTypesetting(
+    textUnitId: string,
+    input: TextUnitTypesettingInput,
+  ): Promise<{ chapterId: string; fontSize: number; id: string }>;
+  updateChapterTextSize(
+    chapterId: string,
+    input: ChapterTextSizeInput,
+  ): Promise<{ chapterId: string; delta: number; updated: number }>;
   addCharacter(projectId: string, input: CharacterInput): Promise<Character>;
   updateCharacter(
     characterId: string,

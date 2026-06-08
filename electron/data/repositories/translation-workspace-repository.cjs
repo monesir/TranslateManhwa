@@ -6,6 +6,23 @@ const {
 const { ChapterRepository } = require("./chapter-repository.cjs");
 const { DictionaryRepository } = require("./dictionary-repository.cjs");
 
+const DEFAULT_TEXT_UNIT_FONT_SIZE = 18;
+const MIN_TEXT_UNIT_FONT_SIZE = 8;
+const MAX_TEXT_UNIT_FONT_SIZE = 72;
+
+function normalizeFontSize(value) {
+  if (value == null || value === "") return DEFAULT_TEXT_UNIT_FONT_SIZE;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return DEFAULT_TEXT_UNIT_FONT_SIZE;
+  return Math.max(MIN_TEXT_UNIT_FONT_SIZE, Math.min(MAX_TEXT_UNIT_FONT_SIZE, Math.round(numeric)));
+}
+
+function normalizeFontDelta(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(-24, Math.min(24, Math.round(numeric)));
+}
+
 class TranslationWorkspaceRepository {
   constructor(db) {
     this.db = db;
@@ -82,7 +99,14 @@ class TranslationWorkspaceRepository {
           WHERE oc.text_unit_id = tu.id
           ORDER BY oc.created_at DESC
           LIMIT 1
-        ) AS ocr_provider
+        ) AS ocr_provider,
+        (
+          SELECT ti.font_size
+          FROM typesetting_items ti
+          WHERE ti.text_unit_id = tu.id
+          ORDER BY ti.updated_at DESC
+          LIMIT 1
+        ) AS typesetting_font_size
       FROM text_units tu
       WHERE tu.chapter_id = ?
       ORDER BY tu.unit_order ASC
@@ -249,6 +273,118 @@ class TranslationWorkspaceRepository {
     return {
       chapterId: existing.chapter_id,
       id: textUnitId,
+    };
+  }
+
+  upsertTextUnitFontSize(textUnitId, fontSize, timestamp) {
+    const normalizedFontSize = normalizeFontSize(fontSize);
+    this.db.prepare(`
+      INSERT INTO typesetting_items (
+        id, text_unit_id, font_family, font_size, font_weight, align, box_json, style_json, created_at, updated_at
+      ) VALUES (?, ?, NULL, ?, NULL, NULL, NULL, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        font_size = excluded.font_size,
+        style_json = excluded.style_json,
+        updated_at = excluded.updated_at
+    `).run(
+      `typesetting_${textUnitId}`,
+      textUnitId,
+      normalizedFontSize,
+      JSON.stringify({ fontSize: normalizedFontSize }),
+      timestamp,
+      timestamp,
+    );
+    return normalizedFontSize;
+  }
+
+  updateTextUnitTypesetting(textUnitId, input) {
+    const existing = this.db.prepare(`
+      SELECT tu.id, tu.chapter_id
+      FROM text_units tu
+      WHERE tu.id = ?
+    `).get(textUnitId);
+
+    if (!existing) {
+      throw new Error("Text unit not found");
+    }
+
+    const timestamp = new Date().toISOString();
+    const fontSize = normalizeFontSize(input?.fontSize);
+
+    this.db.exec("BEGIN");
+    try {
+      this.upsertTextUnitFontSize(textUnitId, fontSize, timestamp);
+      this.db.prepare("UPDATE text_units SET updated_at = ? WHERE id = ?").run(timestamp, textUnitId);
+      this.db.prepare("UPDATE chapters SET updated_at = ? WHERE id = ?").run(timestamp, existing.chapter_id);
+      this.db.prepare(`
+        UPDATE projects
+        SET updated_at = ?
+        WHERE id = (SELECT project_id FROM chapters WHERE id = ?)
+      `).run(timestamp, existing.chapter_id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    return {
+      chapterId: existing.chapter_id,
+      fontSize,
+      id: textUnitId,
+    };
+  }
+
+  updateChapterTextSize(chapterId, input) {
+    const chapter = this.db.prepare(`
+      SELECT id
+      FROM chapters
+      WHERE id = ?
+    `).get(chapterId);
+
+    if (!chapter) {
+      throw new Error("Chapter not found");
+    }
+
+    const delta = normalizeFontDelta(input?.delta);
+    const timestamp = new Date().toISOString();
+    const rows = this.db.prepare(`
+      SELECT
+        tu.id,
+        (
+          SELECT ti.font_size
+          FROM typesetting_items ti
+          WHERE ti.text_unit_id = tu.id
+          ORDER BY ti.updated_at DESC
+          LIMIT 1
+        ) AS font_size
+      FROM text_units tu
+      WHERE tu.chapter_id = ?
+      ORDER BY tu.unit_order ASC
+    `).all(chapterId);
+
+    this.db.exec("BEGIN");
+    try {
+      for (const row of rows) {
+        const currentFontSize = normalizeFontSize(row.font_size);
+        this.upsertTextUnitFontSize(row.id, currentFontSize + delta, timestamp);
+      }
+
+      this.db.prepare("UPDATE chapters SET updated_at = ? WHERE id = ?").run(timestamp, chapterId);
+      this.db.prepare(`
+        UPDATE projects
+        SET updated_at = ?
+        WHERE id = (SELECT project_id FROM chapters WHERE id = ?)
+      `).run(timestamp, chapterId);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    return {
+      chapterId,
+      delta,
+      updated: rows.length,
     };
   }
 }

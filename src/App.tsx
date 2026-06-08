@@ -88,9 +88,11 @@ import {
   runOcrForRegion,
   searchSourceTitles,
   updateCharacter,
+  updateChapterTextSize,
   updateFinalTranslation,
   updateGlossaryTerm,
   updateTextUnitSource,
+  updateTextUnitTypesetting,
 } from "./mock/api";
 import type {
   ActiveTool,
@@ -248,6 +250,14 @@ const DEFAULT_OCR_REGION_EXPANSION: OcrRegionExpansion = {
   right: 96,
   top: 30,
 };
+const MIN_TEXT_UNIT_FONT_SIZE = 8;
+const MAX_TEXT_UNIT_FONT_SIZE = 72;
+const TEXT_UNIT_FONT_STEP = 2;
+
+function clampTextUnitFontSize(value: number) {
+  if (!Number.isFinite(value)) return 18;
+  return Math.max(MIN_TEXT_UNIT_FONT_SIZE, Math.min(MAX_TEXT_UNIT_FONT_SIZE, Math.round(value)));
+}
 
 function defaultCreateProjectForm(): CreateProjectFormState {
   return {
@@ -2255,6 +2265,23 @@ function TranslationPage() {
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
     },
   });
+  const updateTextUnitTypesettingMutation = useMutation({
+    mutationFn: ({ fontSize, textUnitId }: { fontSize: number; textUnitId: string }) =>
+      updateTextUnitTypesetting(textUnitId, { fontSize }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+  });
+  const updateChapterTextSizeMutation = useMutation({
+    mutationFn: (delta: number) => updateChapterTextSize(chapterId ?? "", { delta }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+  });
   const runPageOcrMutation = useMutation({
     mutationFn: ({ pageId, input }: { pageId: string; input: OcrRunOptions }) =>
       runOcrForPage(pageId, input),
@@ -2336,6 +2363,7 @@ function TranslationPage() {
   const pageTextUnits = textUnitsByPage.get(currentPage.id) ?? [];
   const selectedTextUnit =
     workspace.textUnits.find((unit) => unit.id === selectedTextUnitId) ?? workspace.textUnits[0];
+  const selectedFontSize = clampTextUnitFontSize(selectedTextUnit?.typesetting.fontSize ?? 18);
 
   const selectedDictionaryText = dictionaryTextForUnit(selectedTextUnit);
   const matchedCharacterIdSet = new Set(selectedTextUnit?.matchedCharacterIds ?? []);
@@ -2358,6 +2386,20 @@ function TranslationPage() {
   const selectTextUnit = (unit: TextUnit) => {
     setSelectedTextUnitId(unit.id);
     selectPage(unit.pageId);
+  };
+  const setSelectedTextFontSize = (fontSize: number) => {
+    if (!selectedTextUnit || updateTextUnitTypesettingMutation.isPending) return;
+    updateTextUnitTypesettingMutation.mutate({
+      fontSize: clampTextUnitFontSize(fontSize),
+      textUnitId: selectedTextUnit.id,
+    });
+  };
+  const adjustSelectedTextFontSize = (delta: number) => {
+    setSelectedTextFontSize(selectedFontSize + delta);
+  };
+  const adjustAllTextFontSizes = (delta: number) => {
+    if (!chapterId || updateChapterTextSizeMutation.isPending || workspace.textUnits.length === 0) return;
+    updateChapterTextSizeMutation.mutate(delta);
   };
   const ocrInput: OcrRunOptions = {
     languageHint: ocrLanguageHint || undefined,
@@ -2492,6 +2534,7 @@ function TranslationPage() {
     width: page.width * zoom,
   });
   const editRegionStyle = (unit: TextUnit) => ({
+    fontSize: clampTextUnitFontSize(unit.typesetting.fontSize) * zoom,
     height: Math.max(22, unit.region.height * zoom),
     left: unit.region.x * zoom,
     top: unit.region.y * zoom,
@@ -2852,6 +2895,75 @@ function TranslationPage() {
             <p>{selectedTextUnit?.sourceText}</p>
             <small>{selectedTextUnit?.reviewStatus}</small>
           </div>
+          <div className="tool-panel text-size-panel">
+            <h3>Text Size</h3>
+            <div className="text-size-control">
+              <span>All text</span>
+              <div className="text-size-buttons">
+                <button
+                  className="icon-button"
+                  disabled={updateChapterTextSizeMutation.isPending || workspace.textUnits.length === 0}
+                  onClick={() => adjustAllTextFontSizes(-TEXT_UNIT_FONT_STEP)}
+                  title="Decrease all text"
+                  type="button"
+                >
+                  <ZoomOut size={15} />
+                </button>
+                <button
+                  className="icon-button"
+                  disabled={updateChapterTextSizeMutation.isPending || workspace.textUnits.length === 0}
+                  onClick={() => adjustAllTextFontSizes(TEXT_UNIT_FONT_STEP)}
+                  title="Increase all text"
+                  type="button"
+                >
+                  <ZoomIn size={15} />
+                </button>
+              </div>
+            </div>
+            <div className="text-size-control">
+              <span>Selected</span>
+              <div className="font-size-row">
+                <button
+                  className="icon-button"
+                  disabled={!selectedTextUnit || updateTextUnitTypesettingMutation.isPending}
+                  onClick={() => adjustSelectedTextFontSize(-TEXT_UNIT_FONT_STEP)}
+                  title="Decrease selected text"
+                  type="button"
+                >
+                  <ZoomOut size={15} />
+                </button>
+                <input
+                  className="font-size-input"
+                  disabled={!selectedTextUnit || updateTextUnitTypesettingMutation.isPending}
+                  max={MAX_TEXT_UNIT_FONT_SIZE}
+                  min={MIN_TEXT_UNIT_FONT_SIZE}
+                  onChange={(event) => setSelectedTextFontSize(Number(event.target.value))}
+                  step={TEXT_UNIT_FONT_STEP}
+                  type="number"
+                  value={selectedTextUnit ? selectedFontSize : ""}
+                />
+                <button
+                  className="icon-button"
+                  disabled={!selectedTextUnit || updateTextUnitTypesettingMutation.isPending}
+                  onClick={() => adjustSelectedTextFontSize(TEXT_UNIT_FONT_STEP)}
+                  title="Increase selected text"
+                  type="button"
+                >
+                  <ZoomIn size={15} />
+                </button>
+              </div>
+              <input
+                className="font-size-range"
+                disabled={!selectedTextUnit || updateTextUnitTypesettingMutation.isPending}
+                max={MAX_TEXT_UNIT_FONT_SIZE}
+                min={MIN_TEXT_UNIT_FONT_SIZE}
+                onChange={(event) => setSelectedTextFontSize(Number(event.target.value))}
+                step={TEXT_UNIT_FONT_STEP}
+                type="range"
+                value={selectedTextUnit ? selectedFontSize : MIN_TEXT_UNIT_FONT_SIZE}
+              />
+            </div>
+          </div>
         </aside>
       </div>
     </section>
@@ -2972,7 +3084,7 @@ function TextUnitCard({
             type="button"
             onClick={(event) => {
               event.stopPropagation();
-              if (window.confirm("Delete this OCR result?")) onDelete();
+              onDelete();
             }}
           >
             {isDeleting ? <RefreshCw className="spin" size={15} /> : <Trash2 size={15} />}

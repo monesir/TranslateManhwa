@@ -101,6 +101,13 @@ function mapPageRow(row) {
   };
 }
 
+function normalizeTextUnitFontSize(value) {
+  if (value == null || value === "") return 18;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 18;
+  return Math.max(8, Math.min(72, numeric));
+}
+
 function mapTextUnitRow(row) {
   return {
     id: row.id,
@@ -118,6 +125,9 @@ function mapTextUnitRow(row) {
     reviewStatus: row.review_status,
     matchedCharacterIds: [],
     matchedGlossaryTermIds: [],
+    typesetting: {
+      fontSize: normalizeTextUnitFontSize(row.typesetting_font_size),
+    },
   };
 }
 

@@ -1554,7 +1554,6 @@ h3 {
   background: rgba(248, 246, 238, 0.96);
   color: #17110b;
   cursor: pointer;
-  font-size: 12px;
   line-height: 1.25;
   pointer-events: auto;
   text-align: center;
@@ -1840,6 +1839,45 @@ h3 {
   border-color: #6b552a;
   background: #2b2518;
   color: #f0c66d;
+}
+
+.text-size-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.text-size-control {
+  display: grid;
+  gap: 7px;
+}
+
+.text-size-control > span {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.text-size-buttons,
+.font-size-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.font-size-input {
+  width: 72px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #10171b;
+  color: var(--text);
+  text-align: center;
+}
+
+.font-size-range {
+  width: 100%;
+  accent-color: var(--accent);
 }
 
 .tool-panel p {

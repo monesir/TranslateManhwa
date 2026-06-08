@@ -70,6 +70,14 @@ function createAppApi(db, options = {}) {
       return translationWorkspaceRepository.deleteTextUnit(textUnitId);
     },
 
+    updateTextUnitTypesetting(textUnitId, input) {
+      return translationWorkspaceRepository.updateTextUnitTypesetting(textUnitId, input);
+    },
+
+    updateChapterTextSize(chapterId, input) {
+      return translationWorkspaceRepository.updateChapterTextSize(chapterId, input);
+    },
+
     listOcrProviders(languageHint) {
       return ocrService.listProviders(languageHint);
     },

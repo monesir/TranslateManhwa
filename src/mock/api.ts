@@ -25,7 +25,9 @@ import type {
   SourceTitleDetailsResult,
   SourceTitleSummary,
   TextUnit,
+  TextUnitTypesettingInput,
   UpdateTextUnitSourceInput,
+  ChapterTextSizeInput,
 } from "../types/domain";
 import {
   characters,
@@ -70,6 +72,10 @@ const delay = <T>(value: T, ms = 120): Promise<T> =>
   new Promise((resolve) => {
     window.setTimeout(() => resolve(value), ms);
   });
+
+function clampFontSize(value: number) {
+  return Math.max(8, Math.min(72, Math.round(value)));
+}
 
 export async function listProjects(): Promise<Project[]> {
   if (window.florisApi) return window.florisApi.listProjects();
@@ -419,6 +425,7 @@ export async function runOcrForPage(
     reviewStatus: "Needs Review",
     sourceStatus: "Needs Review",
     sourceText: "Mock OCR text",
+    typesetting: { fontSize: 18 },
   };
   mutableTextUnits = [...mutableTextUnits, unit];
   mutableChapters = mutableChapters.map((chapter) =>
@@ -478,6 +485,7 @@ export async function runOcrForRegion(
     reviewStatus: "Needs Review",
     sourceStatus: "Needs Review",
     sourceText: "Mock selected OCR text",
+    typesetting: { fontSize: 18 },
   };
   mutableTextUnits = [...mutableTextUnits, unit];
   mutableChapters = mutableChapters.map((chapter) =>
@@ -580,6 +588,46 @@ export async function deleteTextUnit(textUnitId: string): Promise<{ chapterId: s
   );
 
   return delay({ chapterId: existing.chapterId, id: textUnitId }, 80);
+}
+
+export async function updateTextUnitTypesetting(
+  textUnitId: string,
+  input: TextUnitTypesettingInput,
+): Promise<{ chapterId: string; fontSize: number; id: string }> {
+  if (window.florisApi) return window.florisApi.updateTextUnitTypesetting(textUnitId, input);
+
+  const existing = mutableTextUnits.find((unit) => unit.id === textUnitId);
+  if (!existing) throw new Error("Text unit not found");
+
+  const fontSize = clampFontSize(input.fontSize);
+  mutableTextUnits = mutableTextUnits.map((unit) =>
+    unit.id === textUnitId ? { ...unit, typesetting: { ...unit.typesetting, fontSize } } : unit,
+  );
+
+  return delay({ chapterId: existing.chapterId, fontSize, id: textUnitId }, 80);
+}
+
+export async function updateChapterTextSize(
+  chapterId: string,
+  input: ChapterTextSizeInput,
+): Promise<{ chapterId: string; delta: number; updated: number }> {
+  if (window.florisApi) return window.florisApi.updateChapterTextSize(chapterId, input);
+
+  const delta = Math.max(-24, Math.min(24, Math.round(Number(input.delta) || 0)));
+  let updated = 0;
+  mutableTextUnits = mutableTextUnits.map((unit) => {
+    if (unit.chapterId !== chapterId) return unit;
+    updated += 1;
+    return {
+      ...unit,
+      typesetting: {
+        ...unit.typesetting,
+        fontSize: clampFontSize((unit.typesetting?.fontSize ?? 18) + delta),
+      },
+    };
+  });
+
+  return delay({ chapterId, delta, updated }, 80);
 }
 
 export async function addCharacter(

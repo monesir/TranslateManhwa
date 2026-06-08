@@ -276,6 +276,10 @@ export interface RegionBox {
   height: number;
 }
 
+export interface TextUnitTypesetting {
+  fontSize: number;
+}
+
 export interface TextUnit {
   id: string;
   chapterId: string;
@@ -292,6 +296,7 @@ export interface TextUnit {
   reviewStatus: ReviewStatus;
   matchedCharacterIds: string[];
   matchedGlossaryTermIds: string[];
+  typesetting: TextUnitTypesetting;
 }
 
 export interface ChapterTranslationWorkspace {
@@ -360,6 +365,14 @@ export interface OcrRunResult {
 export interface UpdateTextUnitSourceInput {
   sourceText: string;
   sourceStatus: OcrSourceStatus;
+}
+
+export interface TextUnitTypesettingInput {
+  fontSize: number;
+}
+
+export interface ChapterTextSizeInput {
+  delta: number;
 }
 
 export type ActiveTool =
