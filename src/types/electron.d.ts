@@ -8,6 +8,9 @@ import type {
   GlossaryTermInput,
   GlossaryTerm,
   LibraryStats,
+  OcrProviderStatus,
+  OcrRunOptions,
+  OcrRunResult,
   Project,
   ProjectOverview,
   SourceCatalogItem,
@@ -18,6 +21,7 @@ import type {
   SourceTitleDetailsResult,
   SourceTitleSummary,
   TextUnit,
+  UpdateTextUnitSourceInput,
 } from "./domain";
 
 interface FlorisApi {
@@ -38,6 +42,10 @@ interface FlorisApi {
   }>;
   getChapterForTranslation(chapterId: string): Promise<ChapterTranslationWorkspace | undefined>;
   prepareLibraryChapter(chapterId: string): Promise<SourceChapterPreparationResult>;
+  listOcrProviders(languageHint?: string): Promise<OcrProviderStatus[]>;
+  runOcrForPage(pageId: string, input: OcrRunOptions): Promise<OcrRunResult>;
+  runOcrForChapter(chapterId: string, input: OcrRunOptions): Promise<OcrRunResult>;
+  updateTextUnitSource(textUnitId: string, input: UpdateTextUnitSourceInput): Promise<TextUnit>;
   updateFinalTranslation(textUnitId: string, text: string): Promise<TextUnit>;
   addCharacter(projectId: string, input: CharacterInput): Promise<Character>;
   updateCharacter(

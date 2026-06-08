@@ -10,6 +10,9 @@ import type {
   ExplorerSeriesDetails,
   GlossaryTerm,
   LibraryStats,
+  OcrProviderStatus,
+  OcrRunOptions,
+  OcrRunResult,
   Page,
   Project,
   ProjectOverview,
@@ -21,6 +24,7 @@ import type {
   SourceTitleDetailsResult,
   SourceTitleSummary,
   TextUnit,
+  UpdateTextUnitSourceInput,
 } from "../types/domain";
 import {
   characters,
@@ -300,6 +304,131 @@ export async function getChapterForTranslation(
     characters: mutableCharacters.filter((character) => character.projectId === project.id),
     glossaryTerms: mutableGlossaryTerms.filter((term) => term.projectId === project.id),
   });
+}
+
+export async function listOcrProviders(languageHint = ""): Promise<OcrProviderStatus[]> {
+  if (window.florisApi) return window.florisApi.listOcrProviders(languageHint);
+  void languageHint;
+  return delay([
+    {
+      available: true,
+      engine: "mock",
+      id: "windows",
+      kind: "local",
+      label: "Windows OCR",
+      reason: null,
+      setup: "Electron runtime required for real OCR.",
+      supportsRegions: false,
+    },
+    {
+      available: false,
+      engine: "mock",
+      id: "paddleocr",
+      kind: "local",
+      label: "PaddleOCR",
+      reason: "Electron runtime required for real OCR.",
+      setup: "Install Python packages: pip install paddleocr paddlepaddle",
+      supportsRegions: false,
+    },
+  ]);
+}
+
+export async function runOcrForPage(
+  pageId: string,
+  input: OcrRunOptions,
+): Promise<OcrRunResult> {
+  if (window.florisApi) return window.florisApi.runOcrForPage(pageId, input);
+
+  const page = mutablePages.find((item) => item.id === pageId);
+  if (!page) throw new Error("Page not found");
+  const timestamp = new Date().toISOString();
+  const existingCount = mutableTextUnits.filter((unit) => unit.chapterId === page.chapterId).length;
+  if (input.replaceExisting !== false) {
+    mutableTextUnits = mutableTextUnits.filter((unit) => unit.pageId !== pageId);
+  }
+  const unit: TextUnit = {
+    aiTranslation: "",
+    chapterId: page.chapterId,
+    finalTranslation: "",
+    id: `textunit_${pageId}_${Date.now()}`,
+    matchedCharacterIds: [],
+    matchedGlossaryTermIds: [],
+    microsoftTranslation: "",
+    ocrConfidence: 0.85,
+    ocrProvider: input.providerId,
+    order: existingCount + 1,
+    pageId,
+    region: {
+      type: "box",
+      x: Math.round(page.width * 0.18),
+      y: Math.round(page.height * 0.16),
+      width: Math.round(page.width * 0.42),
+      height: Math.round(page.height * 0.09),
+    },
+    reviewStatus: "Needs Review",
+    sourceStatus: "Needs Review",
+    sourceText: "Mock OCR text",
+  };
+  mutableTextUnits = [...mutableTextUnits, unit];
+  mutableChapters = mutableChapters.map((chapter) =>
+    chapter.id === page.chapterId
+      ? { ...chapter, internalStatus: "OCR Done", textUnitsCount: chapter.textUnitsCount + 1, updatedAt: timestamp }
+      : chapter,
+  );
+  return delay({
+    averageConfidence: 0.85,
+    candidatesCreated: 1,
+    chapterId: page.chapterId,
+    languageDetected: input.languageHint ?? null,
+    pagesProcessed: 1,
+    provider: input.providerId,
+    runId: `ocr_run_${Date.now()}`,
+    status: "completed",
+    textUnitsCreated: 1,
+  });
+}
+
+export async function runOcrForChapter(
+  chapterId: string,
+  input: OcrRunOptions,
+): Promise<OcrRunResult> {
+  if (window.florisApi) return window.florisApi.runOcrForChapter(chapterId, input);
+
+  const chapterPages = mutablePages.filter((page) => page.chapterId === chapterId);
+  if (chapterPages.length === 0) throw new Error("Chapter has no pages");
+  let created = 0;
+  for (const page of chapterPages) {
+    const result = await runOcrForPage(page.id, { ...input, replaceExisting: input.replaceExisting });
+    created += result.textUnitsCreated;
+  }
+  return delay({
+    averageConfidence: 0.85,
+    candidatesCreated: created,
+    chapterId,
+    languageDetected: input.languageHint ?? null,
+    pagesProcessed: chapterPages.length,
+    provider: input.providerId,
+    runId: `ocr_run_${Date.now()}`,
+    status: "completed",
+    textUnitsCreated: created,
+  });
+}
+
+export async function updateTextUnitSource(
+  textUnitId: string,
+  input: UpdateTextUnitSourceInput,
+): Promise<TextUnit> {
+  if (window.florisApi) return window.florisApi.updateTextUnitSource(textUnitId, input);
+
+  const existing = mutableTextUnits.find((unit) => unit.id === textUnitId);
+  if (!existing) throw new Error("Text unit not found");
+  const updated: TextUnit = {
+    ...existing,
+    sourceStatus: input.sourceStatus,
+    sourceText: input.sourceText,
+  };
+  mutableTextUnits = mutableTextUnits.map((unit) => (unit.id === textUnitId ? updated : unit));
+  return delay(updated, 80);
 }
 
 export async function updateFinalTranslation(textUnitId: string, text: string): Promise<TextUnit> {

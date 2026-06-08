@@ -67,7 +67,22 @@ class TranslationWorkspaceRepository {
           WHERE tc.text_unit_id = tu.id AND tc.provider = 'microsoft'
           ORDER BY tc.created_at DESC
           LIMIT 1
-        ) AS microsoft_translation
+        ) AS microsoft_translation,
+        (
+          SELECT oc.confidence
+          FROM ocr_candidates oc
+          WHERE oc.text_unit_id = tu.id
+          ORDER BY oc.created_at DESC
+          LIMIT 1
+        ) AS ocr_confidence,
+        (
+          SELECT ocr.provider
+          FROM ocr_candidates oc
+          JOIN ocr_runs ocr ON ocr.id = oc.ocr_run_id
+          WHERE oc.text_unit_id = tu.id
+          ORDER BY oc.created_at DESC
+          LIMIT 1
+        ) AS ocr_provider
       FROM text_units tu
       WHERE tu.chapter_id = ?
       ORDER BY tu.unit_order ASC
@@ -162,7 +177,22 @@ class TranslationWorkspaceRepository {
           WHERE tc.text_unit_id = tu.id AND tc.provider = 'microsoft'
           ORDER BY tc.created_at DESC
           LIMIT 1
-        ) AS microsoft_translation
+        ) AS microsoft_translation,
+        (
+          SELECT oc.confidence
+          FROM ocr_candidates oc
+          WHERE oc.text_unit_id = tu.id
+          ORDER BY oc.created_at DESC
+          LIMIT 1
+        ) AS ocr_confidence,
+        (
+          SELECT ocr.provider
+          FROM ocr_candidates oc
+          JOIN ocr_runs ocr ON ocr.id = oc.ocr_run_id
+          WHERE oc.text_unit_id = tu.id
+          ORDER BY oc.created_at DESC
+          LIMIT 1
+        ) AS ocr_provider
       FROM text_units tu
       WHERE tu.id = ?
     `).get(textUnitId);

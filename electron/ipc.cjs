@@ -28,6 +28,12 @@ function registerIpcHandlers(appApi) {
       appApi.getChapterForTranslation(chapterId),
     "data:prepareLibraryChapter": (_event, chapterId) =>
       appApi.prepareLibraryChapter(chapterId),
+    "ocr:listProviders": (_event, languageHint) => appApi.listOcrProviders(languageHint),
+    "ocr:runPage": (_event, pageId, input) => appApi.runOcrForPage(pageId, input),
+    "ocr:runChapter": (_event, chapterId, input) =>
+      appApi.runOcrForChapter(chapterId, input),
+    "ocr:updateTextUnitSource": (_event, textUnitId, input) =>
+      appApi.updateTextUnitSource(textUnitId, input),
     "data:updateFinalTranslation": (_event, textUnitId, text) =>
       appApi.updateFinalTranslation(textUnitId, text),
     "data:addCharacter": (_event, projectId, input) => appApi.addCharacter(projectId, input),

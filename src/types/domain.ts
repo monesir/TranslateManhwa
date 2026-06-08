@@ -21,6 +21,24 @@ export type Gender = "Male" | "Female" | "Unknown";
 
 export type ReviewStatus = "Not Reviewed" | "Needs Review" | "Approved";
 
+export type OcrProviderId =
+  | "windows"
+  | "paddleocr"
+  | "tesseract"
+  | "easyocr"
+  | "manga-ocr"
+  | "azure-read"
+  | "google-vision";
+
+export type OcrSourceStatus =
+  | "Empty"
+  | "OCR Ready"
+  | "Needs Review"
+  | "Reviewed"
+  | "Ignored";
+
+export type OcrRunMode = "page" | "region" | "bubble" | "batch";
+
 export interface CharacterAlias {
   id: string;
   english: string;
@@ -265,6 +283,9 @@ export interface TextUnit {
   order: number;
   region: RegionBox;
   sourceText: string;
+  sourceStatus: OcrSourceStatus;
+  ocrConfidence?: number;
+  ocrProvider?: OcrProviderId | string;
   aiTranslation: string;
   microsoftTranslation: string;
   finalTranslation: string;
@@ -293,6 +314,40 @@ export interface SourceChapterPreparationResult {
   chapterId: string;
   pagesCount: number;
   chapter: Chapter;
+}
+
+export interface OcrProviderStatus {
+  id: OcrProviderId;
+  label: string;
+  engine: string;
+  kind: "local" | "cloud";
+  supportsRegions: boolean;
+  setup: string;
+  available: boolean;
+  reason?: string | null;
+}
+
+export interface OcrRunOptions {
+  providerId: OcrProviderId;
+  languageHint?: string;
+  replaceExisting?: boolean;
+}
+
+export interface OcrRunResult {
+  averageConfidence: number | null;
+  candidatesCreated: number;
+  chapterId: string;
+  languageDetected?: string | null;
+  pagesProcessed: number;
+  provider: OcrProviderId | string;
+  runId: string;
+  status: "completed" | "failed";
+  textUnitsCreated: number;
+}
+
+export interface UpdateTextUnitSourceInput {
+  sourceText: string;
+  sourceStatus: OcrSourceStatus;
 }
 
 export type ActiveTool =

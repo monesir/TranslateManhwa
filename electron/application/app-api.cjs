@@ -3,6 +3,7 @@ const { ChapterRepository } = require("../data/repositories/chapter-repository.c
 const { ChapterPageStore } = require("../data/chapter-page-store.cjs");
 const { CoverCache } = require("../data/cover-cache.cjs");
 const { DictionaryRepository } = require("../data/repositories/dictionary-repository.cjs");
+const { OcrService } = require("./ocr-service.cjs");
 const {
   SourceImportRepository,
   sourceChapterId,
@@ -26,6 +27,7 @@ function createAppApi(db, options = {}) {
   const chapterRepository = new ChapterRepository(db, { chapterPageStore });
   const sourceImportRepository = new SourceImportRepository(db, { chapterPageStore, coverCache });
   const translationWorkspaceRepository = new TranslationWorkspaceRepository(db);
+  const ocrService = new OcrService(db, { workspacePath: options.workspacePath });
 
   return {
     listProjects() {
@@ -62,6 +64,22 @@ function createAppApi(db, options = {}) {
 
     updateFinalTranslation(textUnitId, text) {
       return translationWorkspaceRepository.updateFinalTranslation(textUnitId, text);
+    },
+
+    listOcrProviders(languageHint) {
+      return ocrService.listProviders(languageHint);
+    },
+
+    runOcrForPage(pageId, input) {
+      return ocrService.runPage(pageId, input);
+    },
+
+    runOcrForChapter(chapterId, input) {
+      return ocrService.runChapter(chapterId, input);
+    },
+
+    updateTextUnitSource(textUnitId, input) {
+      return ocrService.updateTextUnitSource(textUnitId, input);
     },
 
     addCharacter(projectId, input) {

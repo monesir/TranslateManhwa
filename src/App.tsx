@@ -65,6 +65,7 @@ import {
   getProjectDictionary,
   getProjectOverview,
   getSourceTitleDetails,
+  listOcrProviders,
   listExplorerSeries,
   listProjectChapters,
   listProjects,
@@ -72,10 +73,13 @@ import {
   pickChapterImages,
   prepareLibraryChapter,
   prepareSourceChapter,
+  runOcrForChapter,
+  runOcrForPage,
   searchSourceTitles,
   updateCharacter,
   updateFinalTranslation,
   updateGlossaryTerm,
+  updateTextUnitSource,
 } from "./mock/api";
 import type {
   ActiveTool,
@@ -88,6 +92,9 @@ import type {
   Gender,
   GlossaryTermInput,
   GlossaryTerm,
+  OcrProviderId,
+  OcrRunOptions,
+  OcrSourceStatus,
   Project,
   ProjectOverview,
   SourceCatalogItem,
@@ -111,6 +118,21 @@ function statusClass(status: string) {
 }
 
 const genderOptions: Gender[] = ["Male", "Female", "Unknown"];
+const ocrLanguageOptions = [
+  ["korean", "Korean"],
+  ["japanese", "Japanese"],
+  ["chinese", "Chinese"],
+  ["english", "English"],
+  ["arabic", "Arabic"],
+  ["", "Auto"],
+] as const;
+const sourceStatusOptions: OcrSourceStatus[] = [
+  "Needs Review",
+  "Reviewed",
+  "OCR Ready",
+  "Ignored",
+  "Empty",
+];
 
 interface CharacterFormState {
   englishName: string;
@@ -2050,6 +2072,9 @@ function TranslationPage() {
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [viewerMode, setViewerMode] = useState<"page" | "webtoon">("page");
   const [mergePages, setMergePages] = useState(false);
+  const [ocrProviderId, setOcrProviderId] = useState<OcrProviderId>("windows");
+  const [ocrLanguageHint, setOcrLanguageHint] = useState("korean");
+  const [replaceOcrText, setReplaceOcrText] = useState(true);
   const {
     selectedPageId,
     selectedTextUnitId,
@@ -2065,11 +2090,48 @@ function TranslationPage() {
     queryKey: ["translation-workspace", chapterId],
     queryFn: () => getChapterForTranslation(chapterId ?? ""),
   });
+  const ocrProvidersQuery = useQuery({
+    queryKey: ["ocr-providers", ocrLanguageHint],
+    queryFn: () => listOcrProviders(ocrLanguageHint),
+    staleTime: 30_000,
+  });
 
   const mutation = useMutation({
     mutationFn: ({ id, text }: { id: string; text: string }) => updateFinalTranslation(id, text),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["translation-workspace", chapterId] });
+    },
+  });
+  const sourceMutation = useMutation({
+    mutationFn: ({
+      id,
+      sourceStatus,
+      sourceText,
+    }: {
+      id: string;
+      sourceStatus: OcrSourceStatus;
+      sourceText: string;
+    }) => updateTextUnitSource(id, { sourceStatus, sourceText }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", chapterId] });
+    },
+  });
+  const runPageOcrMutation = useMutation({
+    mutationFn: ({ pageId, input }: { pageId: string; input: OcrRunOptions }) =>
+      runOcrForPage(pageId, input),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+  });
+  const runChapterOcrMutation = useMutation({
+    mutationFn: ({ id, input }: { id: string; input: OcrRunOptions }) =>
+      runOcrForChapter(id, input),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
     },
   });
 
@@ -2101,6 +2163,15 @@ function TranslationPage() {
     });
   }, [selectedPageId, viewerMode]);
 
+  useEffect(() => {
+    const providers = ocrProvidersQuery.data;
+    if (!providers || providers.length === 0) return;
+    const selected = providers.find((provider) => provider.id === ocrProviderId);
+    if (selected?.available) return;
+    const available = providers.find((provider) => provider.available);
+    if (available) setOcrProviderId(available.id);
+  }, [ocrProviderId, ocrProvidersQuery.data]);
+
   if (workspaceQuery.isLoading) return <LoadingPanel label="Loading translation workspace" />;
   if (!workspace) return <EmptyPanel label="Chapter not found" />;
   if (workspace.pages.length === 0) return <EmptyPanel label="Chapter pages are not prepared yet" />;
@@ -2128,6 +2199,27 @@ function TranslationPage() {
     setSelectedTextUnitId(unit.id);
     selectPage(unit.pageId);
   };
+  const ocrInput: OcrRunOptions = {
+    languageHint: ocrLanguageHint || undefined,
+    providerId: ocrProviderId,
+    replaceExisting: replaceOcrText,
+  };
+  const selectedProvider = ocrProvidersQuery.data?.find((provider) => provider.id === ocrProviderId);
+  const isOcrRunning = runPageOcrMutation.isPending || runChapterOcrMutation.isPending;
+  const ocrError =
+    runPageOcrMutation.error instanceof Error
+      ? runPageOcrMutation.error.message
+      : runChapterOcrMutation.error instanceof Error
+        ? runChapterOcrMutation.error.message
+        : null;
+  const runCurrentPageOcr = () => {
+    if (!currentPage || isOcrRunning) return;
+    runPageOcrMutation.mutate({ input: ocrInput, pageId: currentPage.id });
+  };
+  const runWholeChapterOcr = () => {
+    if (!chapterId || isOcrRunning) return;
+    runChapterOcrMutation.mutate({ id: chapterId, input: ocrInput });
+  };
 
   return (
     <section className="translation-screen">
@@ -2140,7 +2232,52 @@ function TranslationPage() {
           <span>{workspace.chapter.displayLabel} / {workspace.chapter.internalStatus}</span>
         </div>
         <div className="topbar-actions">
-          <button className="button secondary"><Wand2 size={15} />Run OCR</button>
+          <select
+            className="field-select compact-select"
+            value={ocrProviderId}
+            onChange={(event) => setOcrProviderId(event.target.value as OcrProviderId)}
+            title={selectedProvider?.reason ?? selectedProvider?.label ?? "OCR provider"}
+          >
+            {(ocrProvidersQuery.data ?? []).map((provider) => (
+              <option key={provider.id} value={provider.id}>
+                {provider.available ? provider.label : `${provider.label} (not ready)`}
+              </option>
+            ))}
+          </select>
+          <select
+            className="field-select compact-select"
+            value={ocrLanguageHint}
+            onChange={(event) => setOcrLanguageHint(event.target.value)}
+            title="OCR language hint"
+          >
+            {ocrLanguageOptions.map(([value, label]) => (
+              <option key={value || "auto"} value={value}>{label}</option>
+            ))}
+          </select>
+          <label className="compact-check" title="Replace existing OCR text units on selected pages">
+            <input
+              type="checkbox"
+              checked={replaceOcrText}
+              onChange={(event) => setReplaceOcrText(event.target.checked)}
+            />
+            Replace
+          </label>
+          <button
+            className="button secondary"
+            disabled={isOcrRunning || !selectedProvider?.available}
+            onClick={runCurrentPageOcr}
+          >
+            <Wand2 size={15} />
+            Page OCR
+          </button>
+          <button
+            className="button secondary"
+            disabled={isOcrRunning || !selectedProvider?.available}
+            onClick={runWholeChapterOcr}
+          >
+            <Layers3 size={15} />
+            Chapter OCR
+          </button>
           <button className="button secondary"><Sparkles size={15} />AI Translate</button>
           <button className="button secondary"><Languages size={15} />Microsoft</button>
           <button className="button secondary"><ShieldCheck size={15} />Quality</button>
@@ -2151,7 +2288,15 @@ function TranslationPage() {
       <div className="translation-layout">
         <aside className="translation-left">
           <MiniDictionary characters={matchedCharacters} terms={matchedTerms} selectedTextUnit={selectedTextUnit} />
+          {selectedProvider && !selectedProvider.available ? (
+            <p className="ocr-status-line">{selectedProvider.reason ?? selectedProvider.setup}</p>
+          ) : null}
+          {ocrError ? <p className="error-line ocr-status-line">{ocrError}</p> : null}
+          {isOcrRunning ? <p className="ocr-status-line">Running OCR...</p> : null}
           <div className="text-unit-list">
+            {workspace.textUnits.length === 0 ? (
+              <EmptyPanel label="Run OCR to create text units" />
+            ) : null}
             {workspace.textUnits.map((unit) => (
               <TextUnitCard
                 key={unit.id}
@@ -2159,6 +2304,9 @@ function TranslationPage() {
                 selected={unit.id === selectedTextUnit?.id}
                 onSelect={() => selectTextUnit(unit)}
                 onFinalChange={(text) => mutation.mutate({ id: unit.id, text })}
+                onSourceChange={(sourceText, sourceStatus) =>
+                  sourceMutation.mutate({ id: unit.id, sourceStatus, sourceText })
+                }
               />
             ))}
           </div>
@@ -2387,26 +2535,76 @@ function TextUnitCard({
   selected,
   onSelect,
   onFinalChange,
+  onSourceChange,
 }: {
   unit: TextUnit;
   selected: boolean;
   onSelect: () => void;
   onFinalChange: (text: string) => void;
+  onSourceChange: (sourceText: string, sourceStatus: OcrSourceStatus) => void;
 }) {
   const [draft, setDraft] = useState(unit.finalTranslation);
+  const [sourceDraft, setSourceDraft] = useState(unit.sourceText);
+  const [sourceStatus, setSourceStatus] = useState<OcrSourceStatus>(unit.sourceStatus);
 
   useEffect(() => {
     setDraft(unit.finalTranslation);
   }, [unit.finalTranslation]);
 
+  useEffect(() => {
+    setSourceDraft(unit.sourceText);
+    setSourceStatus(unit.sourceStatus);
+  }, [unit.sourceStatus, unit.sourceText]);
+
+  const confidence =
+    typeof unit.ocrConfidence === "number" ? `${Math.round(unit.ocrConfidence * 100)}%` : "Unknown";
+  const saveSource = (nextStatus = sourceStatus) => {
+    onSourceChange(sourceDraft, nextStatus);
+  };
+
   return (
     <article className={selected ? "text-unit-card selected" : "text-unit-card"} onClick={onSelect}>
       <div className="text-unit-head">
         <strong>#{unit.order}</strong>
-        <span className={`status-chip ${statusClass(unit.reviewStatus)}`}>{unit.reviewStatus}</span>
+        <span className={`status-chip ${statusClass(unit.sourceStatus)}`}>{unit.sourceStatus}</span>
+      </div>
+      <div className="text-unit-meta">
+        <span>{unit.ocrProvider ?? "Manual"}</span>
+        <span>Confidence: {confidence}</span>
       </div>
       <label>Source / OCR</label>
-      <p>{unit.sourceText}</p>
+      <textarea
+        value={sourceDraft}
+        onBlur={() => saveSource()}
+        onChange={(event) => setSourceDraft(event.target.value)}
+        onClick={(event) => event.stopPropagation()}
+      />
+      <div className="text-unit-review-row" onClick={(event) => event.stopPropagation()}>
+        <select
+          className="field-select"
+          value={sourceStatus}
+          onChange={(event) => {
+            const nextStatus = event.target.value as OcrSourceStatus;
+            setSourceStatus(nextStatus);
+            onSourceChange(sourceDraft, nextStatus);
+          }}
+        >
+          {sourceStatusOptions.map((status) => (
+            <option key={status} value={status}>{status}</option>
+          ))}
+        </select>
+        <button
+          className="button secondary"
+          type="button"
+          onClick={() => {
+            setSourceStatus("Reviewed");
+            saveSource("Reviewed");
+          }}
+        >
+          <ClipboardCheck size={14} />
+          Accept
+        </button>
+      </div>
       <label>AI Translation</label>
       <p dir="rtl">{unit.aiTranslation}</p>
       <label>Microsoft Translation</label>
