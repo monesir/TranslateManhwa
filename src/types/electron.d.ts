@@ -15,6 +15,7 @@ import type {
   Project,
   ProjectOverview,
   ChapterTextSizeInput,
+  RegionBox,
   SourceCatalogItem,
   SourceChapterPreparationResult,
   SourceChapterPage,
@@ -55,7 +56,7 @@ interface FlorisApi {
   updateTextUnitTypesetting(
     textUnitId: string,
     input: TextUnitTypesettingInput,
-  ): Promise<{ chapterId: string; fontSize: number; id: string }>;
+  ): Promise<{ box: RegionBox; chapterId: string; fontSize: number; id: string }>;
   updateChapterTextSize(
     chapterId: string,
     input: ChapterTextSizeInput,

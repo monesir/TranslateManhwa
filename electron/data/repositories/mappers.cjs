@@ -108,13 +108,31 @@ function normalizeTextUnitFontSize(value) {
   return Math.max(8, Math.min(72, numeric));
 }
 
+function normalizeTextUnitBox(value, fallback) {
+  const parsed = typeof value === "string" ? parseJson(value, fallback) : value;
+  const box = parsed && typeof parsed === "object" ? parsed : fallback;
+  const x = Number(box.x);
+  const y = Number(box.y);
+  const width = Number(box.width);
+  const height = Number(box.height);
+  if (![x, y, width, height].every(Number.isFinite)) return fallback;
+  return {
+    type: "box",
+    x: Math.max(0, x),
+    y: Math.max(0, y),
+    width: Math.max(8, width),
+    height: Math.max(8, height),
+  };
+}
+
 function mapTextUnitRow(row) {
+  const region = parseJson(row.region_json, { type: "box", x: 0, y: 0, width: 120, height: 60 });
   return {
     id: row.id,
     chapterId: row.chapter_id,
     pageId: row.page_id,
     order: Number(row.unit_order),
-    region: parseJson(row.region_json, { type: "box", x: 0, y: 0, width: 120, height: 60 }),
+    region,
     sourceText: row.source_final_text ?? row.source_ocr_text ?? "",
     aiTranslation: row.ai_translation ?? "",
     microsoftTranslation: row.microsoft_translation ?? "",
@@ -126,6 +144,7 @@ function mapTextUnitRow(row) {
     matchedCharacterIds: [],
     matchedGlossaryTermIds: [],
     typesetting: {
+      box: normalizeTextUnitBox(row.typesetting_box_json, region),
       fontSize: normalizeTextUnitFontSize(row.typesetting_font_size),
     },
   };

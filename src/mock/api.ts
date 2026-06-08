@@ -17,6 +17,7 @@ import type {
   Page,
   Project,
   ProjectOverview,
+  RegionBox,
   SourceCatalogItem,
   SourceChapterPreparationResult,
   SourceChapterPage,
@@ -75,6 +76,17 @@ const delay = <T>(value: T, ms = 120): Promise<T> =>
 
 function clampFontSize(value: number) {
   return Math.max(8, Math.min(72, Math.round(value)));
+}
+
+function clampTextBox(box: RegionBox | undefined, fallback: RegionBox, page?: Page): RegionBox {
+  const source = box ?? fallback;
+  const pageWidth = page?.width ?? Math.max(source.x + source.width, fallback.x + fallback.width);
+  const pageHeight = page?.height ?? Math.max(source.y + source.height, fallback.y + fallback.height);
+  const width = Math.min(Math.max(16, Number(source.width) || fallback.width), pageWidth);
+  const height = Math.min(Math.max(12, Number(source.height) || fallback.height), pageHeight);
+  const x = Math.max(0, Math.min(Number(source.x) || 0, pageWidth - width));
+  const y = Math.max(0, Math.min(Number(source.y) || 0, pageHeight - height));
+  return { type: "box", x, y, width, height };
 }
 
 export async function listProjects(): Promise<Project[]> {
@@ -403,6 +415,13 @@ export async function runOcrForPage(
   if (input.replaceExisting !== false) {
     mutableTextUnits = mutableTextUnits.filter((unit) => unit.pageId !== pageId);
   }
+  const region = {
+    type: "box" as const,
+    x: Math.round(page.width * 0.18),
+    y: Math.round(page.height * 0.16),
+    width: Math.round(page.width * 0.42),
+    height: Math.round(page.height * 0.09),
+  };
   const unit: TextUnit = {
     aiTranslation: "",
     chapterId: page.chapterId,
@@ -415,17 +434,11 @@ export async function runOcrForPage(
     ocrProvider: input.providerId,
     order: existingCount + 1,
     pageId,
-    region: {
-      type: "box",
-      x: Math.round(page.width * 0.18),
-      y: Math.round(page.height * 0.16),
-      width: Math.round(page.width * 0.42),
-      height: Math.round(page.height * 0.09),
-    },
+    region,
     reviewStatus: "Needs Review",
     sourceStatus: "Needs Review",
     sourceText: "Mock OCR text",
-    typesetting: { fontSize: 18 },
+    typesetting: { box: region, fontSize: 18 },
   };
   mutableTextUnits = [...mutableTextUnits, unit];
   mutableChapters = mutableChapters.map((chapter) =>
@@ -469,6 +482,7 @@ export async function runOcrForRegion(
 
   const timestamp = new Date().toISOString();
   const order = mutableTextUnits.filter((unit) => unit.chapterId === page.chapterId).length + 1;
+  const region = input.region;
   const unit: TextUnit = {
     aiTranslation: "",
     chapterId: page.chapterId,
@@ -481,11 +495,11 @@ export async function runOcrForRegion(
     ocrProvider: input.providerId,
     order,
     pageId,
-    region: input.region,
+    region,
     reviewStatus: "Needs Review",
     sourceStatus: "Needs Review",
     sourceText: "Mock selected OCR text",
-    typesetting: { fontSize: 18 },
+    typesetting: { box: region, fontSize: 18 },
   };
   mutableTextUnits = [...mutableTextUnits, unit];
   mutableChapters = mutableChapters.map((chapter) =>
@@ -593,18 +607,22 @@ export async function deleteTextUnit(textUnitId: string): Promise<{ chapterId: s
 export async function updateTextUnitTypesetting(
   textUnitId: string,
   input: TextUnitTypesettingInput,
-): Promise<{ chapterId: string; fontSize: number; id: string }> {
+): Promise<{ box: RegionBox; chapterId: string; fontSize: number; id: string }> {
   if (window.florisApi) return window.florisApi.updateTextUnitTypesetting(textUnitId, input);
 
   const existing = mutableTextUnits.find((unit) => unit.id === textUnitId);
   if (!existing) throw new Error("Text unit not found");
 
-  const fontSize = clampFontSize(input.fontSize);
+  const page = mutablePages.find((item) => item.id === existing.pageId);
+  const fontSize = input.fontSize == null
+    ? clampFontSize(existing.typesetting?.fontSize ?? 18)
+    : clampFontSize(input.fontSize);
+  const box = clampTextBox(input.box, existing.typesetting?.box ?? existing.region, page);
   mutableTextUnits = mutableTextUnits.map((unit) =>
-    unit.id === textUnitId ? { ...unit, typesetting: { ...unit.typesetting, fontSize } } : unit,
+    unit.id === textUnitId ? { ...unit, typesetting: { ...unit.typesetting, box, fontSize } } : unit,
   );
 
-  return delay({ chapterId: existing.chapterId, fontSize, id: textUnitId }, 80);
+  return delay({ box, chapterId: existing.chapterId, fontSize, id: textUnitId }, 80);
 }
 
 export async function updateChapterTextSize(
@@ -622,6 +640,7 @@ export async function updateChapterTextSize(
       ...unit,
       typesetting: {
         ...unit.typesetting,
+        box: unit.typesetting?.box ?? unit.region,
         fontSize: clampFontSize((unit.typesetting?.fontSize ?? 18) + delta),
       },
     };

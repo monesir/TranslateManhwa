@@ -277,6 +277,7 @@ export interface RegionBox {
 }
 
 export interface TextUnitTypesetting {
+  box: RegionBox;
   fontSize: number;
 }
 
@@ -368,7 +369,8 @@ export interface UpdateTextUnitSourceInput {
 }
 
 export interface TextUnitTypesettingInput {
-  fontSize: number;
+  box?: RegionBox;
+  fontSize?: number;
 }
 
 export interface ChapterTextSizeInput {

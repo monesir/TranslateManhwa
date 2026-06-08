@@ -1,6 +1,7 @@
 const {
   mapPageRow,
   mapProjectRow,
+  parseJson,
   mapTextUnitRow,
 } = require("./mappers.cjs");
 const { ChapterRepository } = require("./chapter-repository.cjs");
@@ -9,6 +10,8 @@ const { DictionaryRepository } = require("./dictionary-repository.cjs");
 const DEFAULT_TEXT_UNIT_FONT_SIZE = 18;
 const MIN_TEXT_UNIT_FONT_SIZE = 8;
 const MAX_TEXT_UNIT_FONT_SIZE = 72;
+const MIN_TEXT_BOX_WIDTH = 16;
+const MIN_TEXT_BOX_HEIGHT = 12;
 
 function normalizeFontSize(value) {
   if (value == null || value === "") return DEFAULT_TEXT_UNIT_FONT_SIZE;
@@ -21,6 +24,56 @@ function normalizeFontDelta(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   return Math.max(-24, Math.min(24, Math.round(numeric)));
+}
+
+function roundBoxCoordinate(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function normalizeRegionBox(value, fallback) {
+  const parsed = typeof value === "string" ? parseJson(value, fallback) : value;
+  const box = parsed && typeof parsed === "object" ? parsed : fallback;
+  const x = Number(box.x);
+  const y = Number(box.y);
+  const width = Number(box.width);
+  const height = Number(box.height);
+  if (![x, y, width, height].every(Number.isFinite)) return fallback;
+  return {
+    type: "box",
+    x: Math.max(0, x),
+    y: Math.max(0, y),
+    width: Math.max(MIN_TEXT_BOX_WIDTH, width),
+    height: Math.max(MIN_TEXT_BOX_HEIGHT, height),
+  };
+}
+
+function normalizeTextBox(value, fallback, pageWidth, pageHeight) {
+  const pageW = Number(pageWidth);
+  const pageH = Number(pageHeight);
+  const hasPageBounds = Number.isFinite(pageW) && Number.isFinite(pageH) && pageW > 0 && pageH > 0;
+  const rawBox = normalizeRegionBox(value, fallback);
+  if (!hasPageBounds) {
+    return {
+      ...rawBox,
+      x: roundBoxCoordinate(rawBox.x),
+      y: roundBoxCoordinate(rawBox.y),
+      width: roundBoxCoordinate(rawBox.width),
+      height: roundBoxCoordinate(rawBox.height),
+    };
+  }
+
+  const width = Math.min(Math.max(MIN_TEXT_BOX_WIDTH, rawBox.width), pageW);
+  const height = Math.min(Math.max(MIN_TEXT_BOX_HEIGHT, rawBox.height), pageH);
+  const x = Math.max(0, Math.min(rawBox.x, pageW - width));
+  const y = Math.max(0, Math.min(rawBox.y, pageH - height));
+
+  return {
+    type: "box",
+    x: roundBoxCoordinate(x),
+    y: roundBoxCoordinate(y),
+    width: roundBoxCoordinate(width),
+    height: roundBoxCoordinate(height),
+  };
 }
 
 class TranslationWorkspaceRepository {
@@ -106,7 +159,14 @@ class TranslationWorkspaceRepository {
           WHERE ti.text_unit_id = tu.id
           ORDER BY ti.updated_at DESC
           LIMIT 1
-        ) AS typesetting_font_size
+        ) AS typesetting_font_size,
+        (
+          SELECT ti.box_json
+          FROM typesetting_items ti
+          WHERE ti.text_unit_id = tu.id
+          ORDER BY ti.updated_at DESC
+          LIMIT 1
+        ) AS typesetting_box_json
       FROM text_units tu
       WHERE tu.chapter_id = ?
       ORDER BY tu.unit_order ASC
@@ -216,7 +276,21 @@ class TranslationWorkspaceRepository {
           WHERE oc.text_unit_id = tu.id
           ORDER BY oc.created_at DESC
           LIMIT 1
-        ) AS ocr_provider
+        ) AS ocr_provider,
+        (
+          SELECT ti.font_size
+          FROM typesetting_items ti
+          WHERE ti.text_unit_id = tu.id
+          ORDER BY ti.updated_at DESC
+          LIMIT 1
+        ) AS typesetting_font_size,
+        (
+          SELECT ti.box_json
+          FROM typesetting_items ti
+          WHERE ti.text_unit_id = tu.id
+          ORDER BY ti.updated_at DESC
+          LIMIT 1
+        ) AS typesetting_box_json
       FROM text_units tu
       WHERE tu.id = ?
     `).get(textUnitId);
@@ -276,44 +350,80 @@ class TranslationWorkspaceRepository {
     };
   }
 
-  upsertTextUnitFontSize(textUnitId, fontSize, timestamp) {
-    const normalizedFontSize = normalizeFontSize(fontSize);
+  getTextUnitTypesettingState(textUnitId) {
+    return this.db.prepare(`
+      SELECT
+        tu.id,
+        tu.chapter_id,
+        tu.region_json,
+        p.width AS page_width,
+        p.height AS page_height,
+        ti.font_size,
+        ti.box_json
+      FROM text_units tu
+      JOIN pages p ON p.id = tu.page_id
+      LEFT JOIN typesetting_items ti ON ti.id = ?
+      WHERE tu.id = ?
+    `).get(`typesetting_${textUnitId}`, textUnitId);
+  }
+
+  normalizeTypesetting(row, input = {}) {
+    const nextInput = input ?? {};
+    const fallbackBox = normalizeRegionBox(row.region_json, {
+      type: "box",
+      x: 0,
+      y: 0,
+      width: 120,
+      height: 60,
+    });
+    const hasFontSize = nextInput.fontSize != null;
+    const hasBox = nextInput.box != null;
+    return {
+      box: normalizeTextBox(
+        hasBox ? nextInput.box : row.box_json,
+        fallbackBox,
+        row.page_width,
+        row.page_height,
+      ),
+      fontSize: normalizeFontSize(hasFontSize ? nextInput.fontSize : row.font_size),
+    };
+  }
+
+  upsertTextUnitTypesettingItem(textUnitId, typesetting, timestamp) {
     this.db.prepare(`
       INSERT INTO typesetting_items (
         id, text_unit_id, font_family, font_size, font_weight, align, box_json, style_json, created_at, updated_at
-      ) VALUES (?, ?, NULL, ?, NULL, NULL, NULL, ?, ?, ?)
+      ) VALUES (?, ?, NULL, ?, NULL, NULL, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         font_size = excluded.font_size,
+        box_json = excluded.box_json,
         style_json = excluded.style_json,
         updated_at = excluded.updated_at
     `).run(
       `typesetting_${textUnitId}`,
       textUnitId,
-      normalizedFontSize,
-      JSON.stringify({ fontSize: normalizedFontSize }),
+      typesetting.fontSize,
+      JSON.stringify(typesetting.box),
+      JSON.stringify(typesetting),
       timestamp,
       timestamp,
     );
-    return normalizedFontSize;
+    return typesetting;
   }
 
   updateTextUnitTypesetting(textUnitId, input) {
-    const existing = this.db.prepare(`
-      SELECT tu.id, tu.chapter_id
-      FROM text_units tu
-      WHERE tu.id = ?
-    `).get(textUnitId);
+    const existing = this.getTextUnitTypesettingState(textUnitId);
 
     if (!existing) {
       throw new Error("Text unit not found");
     }
 
     const timestamp = new Date().toISOString();
-    const fontSize = normalizeFontSize(input?.fontSize);
+    const typesetting = this.normalizeTypesetting(existing, input);
 
     this.db.exec("BEGIN");
     try {
-      this.upsertTextUnitFontSize(textUnitId, fontSize, timestamp);
+      this.upsertTextUnitTypesettingItem(textUnitId, typesetting, timestamp);
       this.db.prepare("UPDATE text_units SET updated_at = ? WHERE id = ?").run(timestamp, textUnitId);
       this.db.prepare("UPDATE chapters SET updated_at = ? WHERE id = ?").run(timestamp, existing.chapter_id);
       this.db.prepare(`
@@ -328,8 +438,9 @@ class TranslationWorkspaceRepository {
     }
 
     return {
+      box: typesetting.box,
       chapterId: existing.chapter_id,
-      fontSize,
+      fontSize: typesetting.fontSize,
       id: textUnitId,
     };
   }
@@ -350,14 +461,14 @@ class TranslationWorkspaceRepository {
     const rows = this.db.prepare(`
       SELECT
         tu.id,
-        (
-          SELECT ti.font_size
-          FROM typesetting_items ti
-          WHERE ti.text_unit_id = tu.id
-          ORDER BY ti.updated_at DESC
-          LIMIT 1
-        ) AS font_size
+        tu.region_json,
+        p.width AS page_width,
+        p.height AS page_height,
+        ti.font_size,
+        ti.box_json
       FROM text_units tu
+      JOIN pages p ON p.id = tu.page_id
+      LEFT JOIN typesetting_items ti ON ti.id = 'typesetting_' || tu.id
       WHERE tu.chapter_id = ?
       ORDER BY tu.unit_order ASC
     `).all(chapterId);
@@ -365,8 +476,11 @@ class TranslationWorkspaceRepository {
     this.db.exec("BEGIN");
     try {
       for (const row of rows) {
-        const currentFontSize = normalizeFontSize(row.font_size);
-        this.upsertTextUnitFontSize(row.id, currentFontSize + delta, timestamp);
+        const currentTypesetting = this.normalizeTypesetting(row);
+        this.upsertTextUnitTypesettingItem(row.id, {
+          ...currentTypesetting,
+          fontSize: normalizeFontSize(currentTypesetting.fontSize + delta),
+        }, timestamp);
       }
 
       this.db.prepare("UPDATE chapters SET updated_at = ? WHERE id = ?").run(timestamp, chapterId);

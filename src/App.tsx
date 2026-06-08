@@ -97,6 +97,7 @@ import {
 import type {
   ActiveTool,
   Chapter,
+  ChapterTranslationWorkspace,
   Character,
   CharacterAliasInput,
   CharacterInput,
@@ -118,6 +119,7 @@ import type {
   SourceChapterSummary,
   SourceTitleSummary,
   TextUnit,
+  TextUnitTypesettingInput,
 } from "./types/domain";
 import { useTranslationWorkspaceStore } from "./stores/translation-workspace-store";
 
@@ -191,6 +193,24 @@ interface OcrSelectionState {
   currentY: number;
 }
 
+type TextBoxDragMode = "move" | "resize-nw" | "resize-ne" | "resize-sw" | "resize-se";
+
+interface TextBoxDragState {
+  currentBox: RegionBox;
+  mode: TextBoxDragMode;
+  page: Page;
+  startBox: RegionBox;
+  startClientX: number;
+  startClientY: number;
+  textUnitId: string;
+  zoom: number;
+}
+
+interface TextBoxDraftState {
+  box: RegionBox;
+  textUnitId: string;
+}
+
 function normalizeSelectionRegion(selection: OcrSelectionState | null): RegionBox | null {
   if (!selection) return null;
   const x = Math.min(selection.startX, selection.currentX);
@@ -253,10 +273,72 @@ const DEFAULT_OCR_REGION_EXPANSION: OcrRegionExpansion = {
 const MIN_TEXT_UNIT_FONT_SIZE = 8;
 const MAX_TEXT_UNIT_FONT_SIZE = 72;
 const TEXT_UNIT_FONT_STEP = 2;
+const MIN_TEXT_BOX_WIDTH = 16;
+const MIN_TEXT_BOX_HEIGHT = 12;
 
 function clampTextUnitFontSize(value: number) {
   if (!Number.isFinite(value)) return 18;
   return Math.max(MIN_TEXT_UNIT_FONT_SIZE, Math.min(MAX_TEXT_UNIT_FONT_SIZE, Math.round(value)));
+}
+
+function clampTextBoxToPage(box: RegionBox, page: Page): RegionBox {
+  const width = Math.min(Math.max(MIN_TEXT_BOX_WIDTH, box.width), page.width);
+  const height = Math.min(Math.max(MIN_TEXT_BOX_HEIGHT, box.height), page.height);
+  return {
+    type: "box",
+    x: Math.max(0, Math.min(box.x, page.width - width)),
+    y: Math.max(0, Math.min(box.y, page.height - height)),
+    width,
+    height,
+  };
+}
+
+function transformTextBox(
+  mode: TextBoxDragMode,
+  startBox: RegionBox,
+  deltaX: number,
+  deltaY: number,
+  page: Page,
+): RegionBox {
+  if (mode === "move") {
+    return clampTextBoxToPage({
+      ...startBox,
+      x: startBox.x + deltaX,
+      y: startBox.y + deltaY,
+    }, page);
+  }
+
+  let left = startBox.x;
+  let top = startBox.y;
+  let right = startBox.x + startBox.width;
+  let bottom = startBox.y + startBox.height;
+
+  if (mode.includes("w")) left += deltaX;
+  if (mode.includes("e")) right += deltaX;
+  if (mode.includes("n")) top += deltaY;
+  if (mode.includes("s")) bottom += deltaY;
+
+  left = Math.max(0, Math.min(left, page.width - MIN_TEXT_BOX_WIDTH));
+  top = Math.max(0, Math.min(top, page.height - MIN_TEXT_BOX_HEIGHT));
+  right = Math.max(MIN_TEXT_BOX_WIDTH, Math.min(right, page.width));
+  bottom = Math.max(MIN_TEXT_BOX_HEIGHT, Math.min(bottom, page.height));
+
+  if (right - left < MIN_TEXT_BOX_WIDTH) {
+    if (mode.includes("w")) left = right - MIN_TEXT_BOX_WIDTH;
+    else right = left + MIN_TEXT_BOX_WIDTH;
+  }
+  if (bottom - top < MIN_TEXT_BOX_HEIGHT) {
+    if (mode.includes("n")) top = bottom - MIN_TEXT_BOX_HEIGHT;
+    else bottom = top + MIN_TEXT_BOX_HEIGHT;
+  }
+
+  return clampTextBoxToPage({
+    type: "box",
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+  }, page);
 }
 
 function defaultCreateProjectForm(): CreateProjectFormState {
@@ -2203,6 +2285,7 @@ function TranslationPage() {
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const editPageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const splitStageRef = useRef<HTMLDivElement | null>(null);
+  const textBoxDragRef = useRef<TextBoxDragState | null>(null);
   const translationScreenRef = useRef<HTMLElement | null>(null);
   const ocrSelectionRef = useRef<OcrSelectionState | null>(null);
   const [viewerMode, setViewerMode] = useState<"page" | "webtoon">("page");
@@ -2212,6 +2295,7 @@ function TranslationPage() {
   const [ocrLanguageHint, setOcrLanguageHint] = useState("english");
   const [replaceOcrText, setReplaceOcrText] = useState(true);
   const [ocrSelection, setOcrSelection] = useState<OcrSelectionState | null>(null);
+  const [textBoxDraft, setTextBoxDraft] = useState<TextBoxDraftState | null>(null);
   const {
     selectedPageId,
     selectedTextUnitId,
@@ -2266,12 +2350,34 @@ function TranslationPage() {
     },
   });
   const updateTextUnitTypesettingMutation = useMutation({
-    mutationFn: ({ fontSize, textUnitId }: { fontSize: number; textUnitId: string }) =>
-      updateTextUnitTypesetting(textUnitId, { fontSize }),
+    mutationFn: ({ input, textUnitId }: { input: TextUnitTypesettingInput; textUnitId: string }) =>
+      updateTextUnitTypesetting(textUnitId, input),
     onSuccess: (result) => {
+      queryClient.setQueryData<ChapterTranslationWorkspace | undefined>(
+        ["translation-workspace", result.chapterId],
+        (current) => current
+          ? {
+            ...current,
+            textUnits: current.textUnits.map((unit) => unit.id === result.id
+              ? {
+                ...unit,
+                typesetting: {
+                  ...unit.typesetting,
+                  box: result.box,
+                  fontSize: result.fontSize,
+                },
+              }
+              : unit),
+          }
+          : current,
+      );
+      setTextBoxDraft((draft) => (draft?.textUnitId === result.id ? null : draft));
       queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
       queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+    onError: () => {
+      setTextBoxDraft(null);
     },
   });
   const updateChapterTextSizeMutation = useMutation({
@@ -2390,7 +2496,7 @@ function TranslationPage() {
   const setSelectedTextFontSize = (fontSize: number) => {
     if (!selectedTextUnit || updateTextUnitTypesettingMutation.isPending) return;
     updateTextUnitTypesettingMutation.mutate({
-      fontSize: clampTextUnitFontSize(fontSize),
+      input: { fontSize: clampTextUnitFontSize(fontSize) },
       textUnitId: selectedTextUnit.id,
     });
   };
@@ -2400,6 +2506,91 @@ function TranslationPage() {
   const adjustAllTextFontSizes = (delta: number) => {
     if (!chapterId || updateChapterTextSizeMutation.isPending || workspace.textUnits.length === 0) return;
     updateChapterTextSizeMutation.mutate(delta);
+  };
+  const pageForTextUnit = (unit: TextUnit) =>
+    workspace.pages.find((page) => page.id === unit.pageId) ?? currentPage;
+  const textBoxForUnit = (unit: TextUnit) =>
+    textBoxDraft?.textUnitId === unit.id ? textBoxDraft.box : unit.typesetting.box ?? unit.region;
+  const selectedTextBox = selectedTextUnit ? textBoxForUnit(selectedTextUnit) : undefined;
+  const setSelectedTextBox = (box: RegionBox) => {
+    if (!selectedTextUnit || updateTextUnitTypesettingMutation.isPending) return;
+    const page = pageForTextUnit(selectedTextUnit);
+    updateTextUnitTypesettingMutation.mutate({
+      input: { box: clampTextBoxToPage(box, page) },
+      textUnitId: selectedTextUnit.id,
+    });
+  };
+  const updateSelectedTextBoxField = (field: "x" | "y" | "width" | "height", value: number) => {
+    if (!selectedTextUnit || !selectedTextBox || !Number.isFinite(value)) return;
+    setSelectedTextBox({
+      ...selectedTextBox,
+      [field]: value,
+    });
+  };
+  const resetSelectedTextBoxToOcrRegion = () => {
+    if (!selectedTextUnit) return;
+    setSelectedTextBox(selectedTextUnit.region);
+  };
+  const commitTextBoxTransform = (textUnitId: string, box: RegionBox) => {
+    updateTextUnitTypesettingMutation.mutate({
+      input: { box },
+      textUnitId,
+    });
+  };
+  const beginTextBoxTransform = (
+    event: PointerEvent<HTMLElement>,
+    unit: TextUnit,
+    page: Page,
+    mode: TextBoxDragMode,
+  ) => {
+    if (event.button !== 0 || updateTextUnitTypesettingMutation.isPending) return;
+    event.preventDefault();
+    event.stopPropagation();
+    selectTextUnit(unit);
+    setActiveTool("typeset");
+
+    const startBox = clampTextBoxToPage(textBoxForUnit(unit), page);
+    const dragState: TextBoxDragState = {
+      currentBox: startBox,
+      mode,
+      page,
+      startBox,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      textUnitId: unit.id,
+      zoom,
+    };
+    textBoxDragRef.current = dragState;
+    setTextBoxDraft({ box: startBox, textUnitId: unit.id });
+
+    const handleMove = (moveEvent: globalThis.PointerEvent) => {
+      const currentDragState = textBoxDragRef.current;
+      if (!currentDragState) return;
+      moveEvent.preventDefault();
+      const deltaX = (moveEvent.clientX - currentDragState.startClientX) / currentDragState.zoom;
+      const deltaY = (moveEvent.clientY - currentDragState.startClientY) / currentDragState.zoom;
+      const box = transformTextBox(
+        currentDragState.mode,
+        currentDragState.startBox,
+        deltaX,
+        deltaY,
+        currentDragState.page,
+      );
+      currentDragState.currentBox = box;
+      setTextBoxDraft({ box, textUnitId: currentDragState.textUnitId });
+    };
+
+    const handleUp = () => {
+      const currentDragState = textBoxDragRef.current;
+      textBoxDragRef.current = null;
+      document.removeEventListener("pointermove", handleMove);
+      document.removeEventListener("pointerup", handleUp);
+      if (!currentDragState) return;
+      commitTextBoxTransform(currentDragState.textUnitId, currentDragState.currentBox);
+    };
+
+    document.addEventListener("pointermove", handleMove);
+    document.addEventListener("pointerup", handleUp, { once: true });
   };
   const ocrInput: OcrRunOptions = {
     languageHint: ocrLanguageHint || undefined,
@@ -2533,13 +2724,22 @@ function TranslationPage() {
     height: page.height * zoom,
     width: page.width * zoom,
   });
-  const editRegionStyle = (unit: TextUnit) => ({
-    fontSize: clampTextUnitFontSize(unit.typesetting.fontSize) * zoom,
-    height: Math.max(22, unit.region.height * zoom),
+  const editWhiteoutRegionStyle = (unit: TextUnit) => ({
+    height: Math.max(8, unit.region.height * zoom),
     left: unit.region.x * zoom,
     top: unit.region.y * zoom,
-    width: Math.max(48, unit.region.width * zoom),
+    width: Math.max(8, unit.region.width * zoom),
   });
+  const editRegionStyle = (unit: TextUnit) => {
+    const box = textBoxForUnit(unit);
+    return {
+      fontSize: clampTextUnitFontSize(unit.typesetting.fontSize) * zoom,
+      height: Math.max(MIN_TEXT_BOX_HEIGHT, box.height * zoom),
+      left: box.x * zoom,
+      top: box.y * zoom,
+      width: Math.max(MIN_TEXT_BOX_WIDTH, box.width * zoom),
+    };
+  };
   const renderPageArtwork = (page: Page) =>
     isRenderableImageUrl(page.imageUrl) ? (
       <img className="page-image" src={page.imageUrl ?? ""} alt={`Page ${page.index}`} />
@@ -2601,17 +2801,45 @@ function TranslationPage() {
       <div className="edit-work-layer">
         {units.map((unit) => {
           const label = unit.finalTranslation || unit.microsoftTranslation || unit.aiTranslation || unit.sourceText;
+          const isSelected = unit.id === selectedTextUnit?.id;
           return (
-            <button
-              className={unit.id === selectedTextUnit?.id ? "edit-text-region selected" : "edit-text-region"}
-              key={unit.id}
-              onClick={() => selectTextUnit(unit)}
-              style={editRegionStyle(unit)}
-              title={unit.sourceText}
-              type="button"
-            >
-              <span dir="auto">{label}</span>
-            </button>
+            <div className="edit-text-item" key={unit.id}>
+              <div className="edit-whiteout-region" style={editWhiteoutRegionStyle(unit)} />
+              <button
+                className={isSelected ? "edit-text-region selected" : "edit-text-region"}
+                onClick={() => selectTextUnit(unit)}
+                onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "move")}
+                style={editRegionStyle(unit)}
+                title={unit.sourceText}
+                type="button"
+              >
+                <span className="edit-text-content" dir="auto">{label}</span>
+                {isSelected ? (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      className="text-box-resize-handle handle-nw"
+                      onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "resize-nw")}
+                    />
+                    <span
+                      aria-hidden="true"
+                      className="text-box-resize-handle handle-ne"
+                      onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "resize-ne")}
+                    />
+                    <span
+                      aria-hidden="true"
+                      className="text-box-resize-handle handle-sw"
+                      onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "resize-sw")}
+                    />
+                    <span
+                      aria-hidden="true"
+                      className="text-box-resize-handle handle-se"
+                      onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "resize-se")}
+                    />
+                  </>
+                ) : null}
+              </button>
+            </div>
           );
         })}
       </div>
@@ -2963,6 +3191,63 @@ function TranslationPage() {
                 value={selectedTextUnit ? selectedFontSize : MIN_TEXT_UNIT_FONT_SIZE}
               />
             </div>
+          </div>
+          <div className="tool-panel text-box-panel">
+            <h3>Text Box</h3>
+            <div className="text-box-grid">
+              <label>
+                <span>X</span>
+                <input
+                  className="box-number-input"
+                  disabled={!selectedTextUnit || updateTextUnitTypesettingMutation.isPending}
+                  min={0}
+                  onChange={(event) => updateSelectedTextBoxField("x", Number(event.target.value))}
+                  type="number"
+                  value={selectedTextBox ? Math.round(selectedTextBox.x) : ""}
+                />
+              </label>
+              <label>
+                <span>Y</span>
+                <input
+                  className="box-number-input"
+                  disabled={!selectedTextUnit || updateTextUnitTypesettingMutation.isPending}
+                  min={0}
+                  onChange={(event) => updateSelectedTextBoxField("y", Number(event.target.value))}
+                  type="number"
+                  value={selectedTextBox ? Math.round(selectedTextBox.y) : ""}
+                />
+              </label>
+              <label>
+                <span>W</span>
+                <input
+                  className="box-number-input"
+                  disabled={!selectedTextUnit || updateTextUnitTypesettingMutation.isPending}
+                  min={MIN_TEXT_BOX_WIDTH}
+                  onChange={(event) => updateSelectedTextBoxField("width", Number(event.target.value))}
+                  type="number"
+                  value={selectedTextBox ? Math.round(selectedTextBox.width) : ""}
+                />
+              </label>
+              <label>
+                <span>H</span>
+                <input
+                  className="box-number-input"
+                  disabled={!selectedTextUnit || updateTextUnitTypesettingMutation.isPending}
+                  min={MIN_TEXT_BOX_HEIGHT}
+                  onChange={(event) => updateSelectedTextBoxField("height", Number(event.target.value))}
+                  type="number"
+                  value={selectedTextBox ? Math.round(selectedTextBox.height) : ""}
+                />
+              </label>
+            </div>
+            <button
+              className="button secondary full-width"
+              disabled={!selectedTextUnit || updateTextUnitTypesettingMutation.isPending}
+              onClick={resetSelectedTextBoxToOcrRegion}
+              type="button"
+            >
+              Reset box
+            </button>
           </div>
         </aside>
       </div>

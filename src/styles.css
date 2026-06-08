@@ -1542,6 +1542,20 @@ h3 {
   pointer-events: none;
 }
 
+.edit-text-item {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.edit-whiteout-region {
+  position: absolute;
+  border-radius: 4px;
+  background: rgba(248, 246, 238, 0.97);
+  box-shadow: 0 0 0 1px rgba(38, 32, 20, 0.08);
+  pointer-events: none;
+}
+
 .edit-text-region {
   position: absolute;
   display: flex;
@@ -1549,17 +1563,18 @@ h3 {
   justify-content: center;
   overflow: hidden;
   padding: 3px 5px;
-  border: 1px solid rgba(38, 32, 20, 0.24);
-  border-radius: 6px;
-  background: rgba(248, 246, 238, 0.96);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
   color: #17110b;
-  cursor: pointer;
+  cursor: move;
   line-height: 1.25;
   pointer-events: auto;
   text-align: center;
+  user-select: none;
 }
 
-.edit-text-region span {
+.edit-text-content {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
@@ -1570,6 +1585,41 @@ h3 {
 .edit-text-region.selected {
   border-color: #b78322;
   box-shadow: 0 0 0 2px rgba(217, 164, 65, 0.24);
+}
+
+.text-box-resize-handle {
+  position: absolute;
+  z-index: 3;
+  width: 9px;
+  height: 9px;
+  border: 1px solid #2a2113;
+  border-radius: 50%;
+  background: #f0c66d;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+}
+
+.text-box-resize-handle.handle-nw {
+  top: -5px;
+  left: -5px;
+  cursor: nwse-resize;
+}
+
+.text-box-resize-handle.handle-ne {
+  top: -5px;
+  right: -5px;
+  cursor: nesw-resize;
+}
+
+.text-box-resize-handle.handle-sw {
+  bottom: -5px;
+  left: -5px;
+  cursor: nesw-resize;
+}
+
+.text-box-resize-handle.handle-se {
+  right: -5px;
+  bottom: -5px;
+  cursor: nwse-resize;
 }
 
 .webtoon-stage {
@@ -1878,6 +1928,43 @@ h3 {
 .font-size-range {
   width: 100%;
   accent-color: var(--accent);
+}
+
+.text-box-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.text-box-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.text-box-grid label {
+  display: grid;
+  gap: 5px;
+}
+
+.text-box-grid span {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.box-number-input {
+  width: 100%;
+  height: 32px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #10171b;
+  color: var(--text);
+  text-align: center;
+}
+
+.full-width {
+  width: 100%;
 }
 
 .tool-panel p {
