@@ -1,6 +1,19 @@
 import argparse
+import contextlib
 import json
+import os
 import sys
+
+os.environ.setdefault("FLAGS_use_onednn", "0")
+os.environ.setdefault("FLAGS_use_mkldnn", "0")
+os.environ.setdefault("PADDLE_DISABLE_MKLDNN", "1")
+os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 
 LANGUAGE_MAP = {
@@ -42,10 +55,16 @@ def normalize_language(value, mapping, fallback):
 
 
 def bbox_from_polygon(points, fallback_width, fallback_height):
-    if not points:
+    if points is None:
         return {"type": "box", "x": 0, "y": 0, "width": fallback_width, "height": fallback_height}
-    xs = [float(point[0]) for point in points]
-    ys = [float(point[1]) for point in points]
+    try:
+        normalized_points = list(points)
+    except Exception:
+        return {"type": "box", "x": 0, "y": 0, "width": fallback_width, "height": fallback_height}
+    if len(normalized_points) == 0:
+        return {"type": "box", "x": 0, "y": 0, "width": fallback_width, "height": fallback_height}
+    xs = [float(point[0]) for point in normalized_points]
+    ys = [float(point[1]) for point in normalized_points]
     min_x = max(0.0, min(xs))
     min_y = max(0.0, min(ys))
     max_x = max(min_x + 1.0, max(xs))
@@ -67,7 +86,37 @@ def normalize_paddle_result(raw_result, fallback_width, fallback_height):
             continue
         entries = page
         if isinstance(page, dict):
-            entries = page.get("rec_texts") or page.get("data") or []
+            rec_texts = page.get("rec_texts")
+            if rec_texts is not None:
+                rec_scores = page.get("rec_scores")
+                rec_polys = page.get("rec_polys")
+                if rec_polys is None:
+                    rec_polys = page.get("dt_polys")
+                if rec_polys is None:
+                    rec_polys = page.get("rec_boxes")
+                score_values = list(rec_scores) if rec_scores is not None else []
+                polygon_values = list(rec_polys) if rec_polys is not None else []
+                for index, text in enumerate(list(rec_texts)):
+                    text = str(text).strip()
+                    if not text:
+                        continue
+                    try:
+                        confidence = float(score_values[index])
+                    except Exception:
+                        confidence = None
+                    try:
+                        polygon = polygon_values[index]
+                    except Exception:
+                        polygon = []
+                    items.append(
+                        {
+                            "text": text,
+                            "confidence": confidence,
+                            "region": bbox_from_polygon(polygon, fallback_width, fallback_height),
+                        }
+                    )
+                continue
+            entries = page.get("data") or []
         for entry in entries:
             text = ""
             confidence = None
@@ -203,15 +252,28 @@ def run_paddle(args):
         raise RuntimeError("PaddleOCR is not installed. Install it with: pip install paddleocr") from exc
 
     language = normalize_language(args.language, LANGUAGE_MAP, "en")
-    try:
-        ocr = PaddleOCR(use_angle_cls=True, lang=language, show_log=False)
-    except TypeError:
-        ocr = PaddleOCR(lang=language)
+    last_error = None
+    ocr = None
+    for kwargs in (
+        {"use_textline_orientation": True, "lang": language},
+        {"use_angle_cls": True, "lang": language},
+        {"lang": language},
+    ):
+        try:
+            ocr = PaddleOCR(**kwargs)
+            break
+        except Exception as exc:
+            last_error = exc
+    if ocr is None:
+        raise RuntimeError(f"PaddleOCR failed to initialize: {last_error}")
 
-    try:
-        result = ocr.ocr(args.image, cls=True)
-    except TypeError:
-        result = ocr.ocr(args.image)
+    if hasattr(ocr, "predict"):
+        result = ocr.predict(args.image)
+    else:
+        try:
+            result = ocr.ocr(args.image, cls=True)
+        except TypeError:
+            result = ocr.ocr(args.image)
     return normalize_paddle_result(result, args.page_width, args.page_height)
 
 
@@ -328,16 +390,17 @@ def main():
     parser.add_argument("--page-height", type=float, default=1240)
     args = parser.parse_args()
 
-    if args.provider == "paddleocr":
-        items = run_paddle(args)
-    elif args.provider == "easyocr":
-        items = run_easyocr(args)
-    elif args.provider == "rapidocr":
-        items = run_rapidocr(args)
-    elif args.provider == "doctr":
-        items = run_doctr(args)
-    else:
-        items = run_manga_ocr(args)
+    with contextlib.redirect_stdout(sys.stderr):
+        if args.provider == "paddleocr":
+            items = run_paddle(args)
+        elif args.provider == "easyocr":
+            items = run_easyocr(args)
+        elif args.provider == "rapidocr":
+            items = run_rapidocr(args)
+        elif args.provider == "doctr":
+            items = run_doctr(args)
+        else:
+            items = run_manga_ocr(args)
 
     print(json.dumps({"items": items}, ensure_ascii=False))
 

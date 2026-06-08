@@ -1,4 +1,5 @@
 const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { commandExists, runProcess } = require("./process-utils.cjs");
@@ -7,6 +8,7 @@ const PYTHON_BRIDGE = path.join(__dirname, "python_ocr_bridge.py");
 const PYTHON_CROP_SCRIPT = path.join(__dirname, "scripts", "crop-image.py");
 const WINDOWS_OCR_SCRIPT = path.join(__dirname, "scripts", "windows-ocr.ps1");
 const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TESSDATA_LANGUAGES = ["ara", "chi_sim", "chi_tra", "eng", "jpn", "kor", "osd"];
 
 const OCR_PROVIDERS = [
   {
@@ -31,7 +33,7 @@ const OCR_PROVIDERS = [
     engine: "tesseract-cli",
     kind: "local",
     supportsRegions: true,
-    setup: "Install Tesseract and put tesseract.exe on PATH.",
+    setup: "Install Tesseract and place traineddata files in the app tessdata directory.",
   },
   {
     id: "easyocr",
@@ -103,6 +105,61 @@ function languageHintToTesseract(languageHint) {
     ko: "kor",
   };
   return map[key] ?? "eng";
+}
+
+function candidateTesseractCommands() {
+  return [
+    process.env.TESSERACT_CMD,
+    "tesseract",
+    process.platform === "win32" ? path.join(process.env.ProgramFiles || "C:\\Program Files", "Tesseract-OCR", "tesseract.exe") : null,
+    process.platform === "win32"
+      ? path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Tesseract-OCR", "tesseract.exe")
+      : null,
+  ].filter(Boolean);
+}
+
+async function resolveTesseractCommand() {
+  for (const command of candidateTesseractCommands()) {
+    if (command === "tesseract") {
+      if (await commandExists(command)) return command;
+      continue;
+    }
+    if (!fsSync.existsSync(command)) continue;
+    const result = await runProcess(command, ["--version"], { timeoutMs: 8_000 });
+    if (result.ok) return command;
+  }
+  return null;
+}
+
+function candidateTessdataDirectories() {
+  return [
+    process.env.FLORIS_TESSDATA_DIR,
+    process.env.TESSDATA_PREFIX,
+    process.env.APPDATA ? path.join(process.env.APPDATA, "floris-manhwa-translator", "tessdata") : null,
+    process.platform === "win32" ? path.join(process.env.ProgramFiles || "C:\\Program Files", "Tesseract-OCR", "tessdata") : null,
+    process.platform === "win32"
+      ? path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Tesseract-OCR", "tessdata")
+      : null,
+  ].filter(Boolean);
+}
+
+function resolveTessdataDirectory(language = "eng") {
+  const candidates = candidateTessdataDirectories();
+  for (const directory of candidates) {
+    if (!fsSync.existsSync(directory)) continue;
+    const hasRequested = fsSync.existsSync(path.join(directory, `${language}.traineddata`));
+    const hasEnglish = fsSync.existsSync(path.join(directory, "eng.traineddata"));
+    if (hasRequested || hasEnglish) return directory;
+  }
+  return null;
+}
+
+function installedTessdataLanguages(directory) {
+  if (!directory || !fsSync.existsSync(directory)) return [];
+  return fsSync
+    .readdirSync(directory)
+    .filter((fileName) => fileName.endsWith(".traineddata"))
+    .map((fileName) => path.basename(fileName, ".traineddata"));
 }
 
 function normalizeRegion(region, pageWidth, pageHeight) {
@@ -359,8 +416,14 @@ function parseJsonOutput(result, providerId) {
     throw new Error(detail);
   }
 
+  const jsonCandidate = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .reverse()
+    .find((line) => line.startsWith("{") && line.endsWith("}")) ?? output;
+
   try {
-    return JSON.parse(output || "{}");
+    return JSON.parse(jsonCandidate || "{}");
   } catch (error) {
     throw new Error(`${providerId} returned invalid JSON: ${error.message}`);
   }
@@ -499,8 +562,20 @@ class OcrProviderRegistry {
       }
 
       if (providerId === "tesseract") {
-        const available = await commandExists("tesseract");
-        return { ...provider, available, reason: available ? null : provider.setup };
+        const command = await resolveTesseractCommand();
+        const tessdataDirectory = resolveTessdataDirectory("eng");
+        const languages = installedTessdataLanguages(tessdataDirectory);
+        const hasRequiredLanguages = DEFAULT_TESSDATA_LANGUAGES.every((language) => languages.includes(language));
+        const available = Boolean(command && tessdataDirectory && hasRequiredLanguages);
+        return {
+          ...provider,
+          available,
+          reason: available
+            ? null
+            : command
+              ? `Missing Tesseract traineddata: ${DEFAULT_TESSDATA_LANGUAGES.filter((language) => !languages.includes(language)).join(", ")}`
+              : provider.setup,
+        };
       }
 
       if (providerId === "paddleocr") {
@@ -615,10 +690,24 @@ class OcrProviderRegistry {
   }
 
   async runTesseract(page, options) {
+    const command = await resolveTesseractCommand();
+    if (!command) throw new Error("Tesseract is not installed.");
     const language = languageHintToTesseract(options.languageHint);
+    const tessdataDirectory = resolveTessdataDirectory(language);
+    const args = [
+      page.imagePath,
+      "stdout",
+      "-l",
+      language,
+      "--psm",
+      "6",
+      "-c",
+      "tessedit_create_tsv=1",
+    ];
+    if (tessdataDirectory) args.splice(2, 0, "--tessdata-dir", tessdataDirectory);
     const result = await runProcess(
-      "tesseract",
-      [page.imagePath, "stdout", "-l", language, "--psm", "6", "tsv"],
+      command,
+      args,
       { timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS },
     );
     if (!result.ok) {
