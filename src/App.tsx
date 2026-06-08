@@ -42,6 +42,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
 } from "react";
@@ -2114,6 +2115,7 @@ function TranslationPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const translationScreenRef = useRef<HTMLElement | null>(null);
   const ocrSelectionRef = useRef<OcrSelectionState | null>(null);
   const [viewerMode, setViewerMode] = useState<"page" | "webtoon">("page");
   const [mergePages, setMergePages] = useState(false);
@@ -2178,8 +2180,6 @@ function TranslationPage() {
       queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
       queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
-      ocrSelectionRef.current = null;
-      setOcrSelection(null);
     },
   });
   const runChapterOcrMutation = useMutation({
@@ -2304,6 +2304,9 @@ function TranslationPage() {
     ocrSelectionRef.current = null;
     setOcrSelection(null);
     setActiveTool("ocr");
+    window.requestAnimationFrame(() => {
+      translationScreenRef.current?.focus({ preventScroll: true });
+    });
   };
   const pointFromSvg = (event: PointerEvent<SVGSVGElement>, page: Page) => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -2317,6 +2320,7 @@ function TranslationPage() {
   const beginOcrSelection = (event: PointerEvent<SVGSVGElement>, page: Page) => {
     if (activeTool !== "ocr" || isOcrRunning || event.button !== 0) return;
     event.preventDefault();
+    event.currentTarget.focus();
     const point = pointFromSvg(event, page);
     event.currentTarget.setPointerCapture(event.pointerId);
     const selection = {
@@ -2357,9 +2361,22 @@ function TranslationPage() {
     setOcrSelection(finalSelection);
     if (shouldRun) runOcrSelection(finalSelection);
   };
+  const confirmOcrSelectionOnEnter = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Enter" || activeTool !== "ocr") return;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (target && ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) return;
+    event.preventDefault();
+    const selection = ocrSelectionRef.current ?? ocrSelection;
+    if (selection) runOcrSelection(selection);
+  };
 
   return (
-    <section className="translation-screen">
+    <section
+      className="translation-screen"
+      onKeyUp={confirmOcrSelectionOnEnter}
+      ref={translationScreenRef}
+      tabIndex={-1}
+    >
       <header className="translation-topbar">
         <button className="icon-button" onClick={() => navigate(`/projects/${projectId}`)} title="Back">
           <ArrowLeft size={18} />
@@ -2525,6 +2542,7 @@ function TranslationPage() {
                 )}
                 <svg
                   className={activeTool === "ocr" ? "region-layer is-selecting" : "region-layer"}
+                  tabIndex={0}
                   viewBox={`0 0 ${currentPage.width} ${currentPage.height}`}
                   onPointerDown={(event) => beginOcrSelection(event, currentPage)}
                   onPointerMove={(event) => moveOcrSelection(event, currentPage)}
@@ -2588,6 +2606,7 @@ function TranslationPage() {
                         )}
                         <svg
                           className={activeTool === "ocr" ? "region-layer is-selecting" : "region-layer"}
+                          tabIndex={0}
                           viewBox={`0 0 ${page.width} ${page.height}`}
                           onPointerDown={(event) => beginOcrSelection(event, page)}
                           onPointerMove={(event) => moveOcrSelection(event, page)}

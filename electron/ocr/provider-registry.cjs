@@ -5,7 +5,6 @@ const { commandExists, runProcess } = require("./process-utils.cjs");
 
 const PYTHON_BRIDGE = path.join(__dirname, "python_ocr_bridge.py");
 const PYTHON_CROP_SCRIPT = path.join(__dirname, "scripts", "crop-image.py");
-const CROP_IMAGE_SCRIPT = path.join(__dirname, "scripts", "crop-image.ps1");
 const WINDOWS_OCR_SCRIPT = path.join(__dirname, "scripts", "windows-ocr.ps1");
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -181,35 +180,6 @@ async function cropWithNativeImage(sourcePath, outputPath, cropRect) {
   return true;
 }
 
-async function cropWithPowerShell(sourcePath, outputPath, cropRect) {
-  const result = await runProcess(
-    "powershell.exe",
-    [
-      "-NoProfile",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-File",
-      CROP_IMAGE_SCRIPT,
-      "-SourcePath",
-      sourcePath,
-      "-OutputPath",
-      outputPath,
-      "-X",
-      String(cropRect.x),
-      "-Y",
-      String(cropRect.y),
-      "-Width",
-      String(cropRect.width),
-      "-Height",
-      String(cropRect.height),
-    ],
-    { timeoutMs: 30_000 },
-  );
-  if (!result.ok) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || "Image crop failed.");
-  }
-}
-
 async function cropWithPython(pythonCommand, sourcePath, outputPath, cropRect) {
   const result = await runProcess(
     pythonCommand,
@@ -243,24 +213,19 @@ async function cropPageForRegion(page, region, pythonCommand = process.env.FLORI
   const outputPath = path.join(tempDirectory, "region.png");
 
   try {
-    const nativeCropOk = await cropWithNativeImage(page.imagePath, outputPath, cropRect);
-    if (!nativeCropOk) {
-      let pythonCrop = { error: "", ok: false };
-      try {
-        pythonCrop = await cropWithPython(pythonCommand, page.imagePath, outputPath, cropRect);
-      } catch (error) {
-        pythonCrop = { error: error instanceof Error ? error.message : String(error), ok: false };
-      }
+    let pythonCrop = { error: "", ok: false };
+    try {
+      pythonCrop = await cropWithPython(pythonCommand, page.imagePath, outputPath, cropRect);
+    } catch (error) {
+      pythonCrop = { error: error instanceof Error ? error.message : String(error), ok: false };
+    }
 
-      if (!pythonCrop.ok) {
-        try {
-          await cropWithPowerShell(page.imagePath, outputPath, cropRect);
-        } catch (error) {
-          const powerShellError = error instanceof Error ? error.message : String(error);
-          throw new Error(
-            `Image crop failed. Python: ${pythonCrop.error || "not available"}. PowerShell: ${powerShellError}`,
-          );
-        }
+    if (!pythonCrop.ok) {
+      const nativeCropOk = await cropWithNativeImage(page.imagePath, outputPath, cropRect);
+      if (!nativeCropOk) {
+        throw new Error(
+          `Image crop failed. Python/Pillow: ${pythonCrop.error || "not available"}. Electron nativeImage could not crop this image.`,
+        );
       }
     }
   } catch (error) {
