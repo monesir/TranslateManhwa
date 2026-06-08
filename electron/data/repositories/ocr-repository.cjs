@@ -66,6 +66,23 @@ function averageConfidence(items) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function regionRight(region) {
+  return Number(region?.x ?? 0) + Number(region?.width ?? 0);
+}
+
+function regionBottom(region) {
+  return Number(region?.y ?? 0) + Number(region?.height ?? 0);
+}
+
+function regionsIntersect(first, second) {
+  return !(
+    regionRight(first) < Number(second?.x ?? 0) ||
+    regionRight(second) < Number(first?.x ?? 0) ||
+    regionBottom(first) < Number(second?.y ?? 0) ||
+    regionBottom(second) < Number(first?.y ?? 0)
+  );
+}
+
 class OcrRepository {
   constructor(db, options = {}) {
     this.db = db;
@@ -158,6 +175,21 @@ class OcrRepository {
     this.db.prepare("DELETE FROM text_units WHERE page_id = ?").run(pageId);
   }
 
+  replacePageTextUnitsInRegion(pageId, region) {
+    const rows = this.db.prepare(`
+      SELECT id, region_json
+      FROM text_units
+      WHERE page_id = ?
+    `).all(pageId);
+    const ids = rows
+      .filter((row) => regionsIntersect(parseJson(row.region_json, null), region))
+      .map((row) => row.id);
+
+    for (const id of ids) {
+      this.db.prepare("DELETE FROM text_units WHERE id = ?").run(id);
+    }
+  }
+
   nextOrderOffset(chapterId) {
     const row = this.db.prepare(`
       SELECT COALESCE(MAX(unit_order), 0) AS max_order
@@ -226,9 +258,12 @@ class OcrRepository {
     this.db.exec("BEGIN");
     try {
       if (replaceExisting) {
-        const pageIds = new Set(pageResults.map((result) => result.page.pageId));
-        for (const pageId of pageIds) {
-          this.replacePageTextUnits(pageId);
+        for (const pageResult of pageResults) {
+          if (pageResult.replaceRegion) {
+            this.replacePageTextUnitsInRegion(pageResult.page.pageId, pageResult.replaceRegion);
+          } else {
+            this.replacePageTextUnits(pageResult.page.pageId);
+          }
         }
       }
 

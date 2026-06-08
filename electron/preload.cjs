@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("florisApi", {
   prepareLibraryChapter: invoke("data:prepareLibraryChapter"),
   listOcrProviders: invoke("ocr:listProviders"),
   runOcrForPage: invoke("ocr:runPage"),
+  runOcrForRegion: invoke("ocr:runRegion"),
   runOcrForChapter: invoke("ocr:runChapter"),
   updateTextUnitSource: invoke("ocr:updateTextUnitSource"),
   updateFinalTranslation: invoke("data:updateFinalTranslation"),

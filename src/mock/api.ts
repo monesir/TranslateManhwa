@@ -11,6 +11,7 @@ import type {
   GlossaryTerm,
   LibraryStats,
   OcrProviderStatus,
+  OcrRegionRunOptions,
   OcrRunOptions,
   OcrRunResult,
   Page,
@@ -318,7 +319,7 @@ export async function listOcrProviders(languageHint = ""): Promise<OcrProviderSt
       label: "Windows OCR",
       reason: null,
       setup: "Electron runtime required for real OCR.",
-      supportsRegions: false,
+      supportsRegions: true,
     },
     {
       available: false,
@@ -328,7 +329,7 @@ export async function listOcrProviders(languageHint = ""): Promise<OcrProviderSt
       label: "PaddleOCR",
       reason: "Electron runtime required for real OCR.",
       setup: "Install Python packages: pip install paddleocr paddlepaddle",
-      supportsRegions: false,
+      supportsRegions: true,
     },
   ]);
 }
@@ -377,6 +378,66 @@ export async function runOcrForPage(
   );
   return delay({
     averageConfidence: 0.85,
+    candidatesCreated: 1,
+    chapterId: page.chapterId,
+    languageDetected: input.languageHint ?? null,
+    pagesProcessed: 1,
+    provider: input.providerId,
+    runId: `ocr_run_${Date.now()}`,
+    status: "completed",
+    textUnitsCreated: 1,
+  });
+}
+
+export async function runOcrForRegion(
+  pageId: string,
+  input: OcrRegionRunOptions,
+): Promise<OcrRunResult> {
+  if (window.florisApi) return window.florisApi.runOcrForRegion(pageId, input);
+
+  const page = mutablePages.find((item) => item.id === pageId);
+  if (!page) throw new Error("Page not found");
+  if (input.replaceExisting !== false) {
+    const left = input.region.x;
+    const top = input.region.y;
+    const right = input.region.x + input.region.width;
+    const bottom = input.region.y + input.region.height;
+    mutableTextUnits = mutableTextUnits.filter((unit) => {
+      if (unit.pageId !== pageId) return true;
+      const unitRight = unit.region.x + unit.region.width;
+      const unitBottom = unit.region.y + unit.region.height;
+      return unitRight < left || unit.region.x > right || unitBottom < top || unit.region.y > bottom;
+    });
+  }
+
+  const timestamp = new Date().toISOString();
+  const order = mutableTextUnits.filter((unit) => unit.chapterId === page.chapterId).length + 1;
+  const unit: TextUnit = {
+    aiTranslation: "",
+    chapterId: page.chapterId,
+    finalTranslation: "",
+    id: `textunit_region_${pageId}_${Date.now()}`,
+    matchedCharacterIds: [],
+    matchedGlossaryTermIds: [],
+    microsoftTranslation: "",
+    ocrConfidence: 0.87,
+    ocrProvider: input.providerId,
+    order,
+    pageId,
+    region: input.region,
+    reviewStatus: "Needs Review",
+    sourceStatus: "Needs Review",
+    sourceText: "Mock selected OCR text",
+  };
+  mutableTextUnits = [...mutableTextUnits, unit];
+  mutableChapters = mutableChapters.map((chapter) =>
+    chapter.id === page.chapterId
+      ? { ...chapter, internalStatus: "OCR Done", textUnitsCount: chapter.textUnitsCount + 1, updatedAt: timestamp }
+      : chapter,
+  );
+
+  return delay({
+    averageConfidence: 0.87,
     candidatesCreated: 1,
     chapterId: page.chapterId,
     languageDetected: input.languageHint ?? null,

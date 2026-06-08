@@ -74,6 +74,10 @@ function createAppApi(db, options = {}) {
       return ocrService.runPage(pageId, input);
     },
 
+    runOcrForRegion(pageId, input) {
+      return ocrService.runRegion(pageId, input);
+    },
+
     runOcrForChapter(chapterId, input) {
       return ocrService.runChapter(chapterId, input);
     },

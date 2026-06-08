@@ -9,6 +9,7 @@ import type {
   GlossaryTerm,
   LibraryStats,
   OcrProviderStatus,
+  OcrRegionRunOptions,
   OcrRunOptions,
   OcrRunResult,
   Project,
@@ -44,6 +45,7 @@ interface FlorisApi {
   prepareLibraryChapter(chapterId: string): Promise<SourceChapterPreparationResult>;
   listOcrProviders(languageHint?: string): Promise<OcrProviderStatus[]>;
   runOcrForPage(pageId: string, input: OcrRunOptions): Promise<OcrRunResult>;
+  runOcrForRegion(pageId: string, input: OcrRegionRunOptions): Promise<OcrRunResult>;
   runOcrForChapter(chapterId: string, input: OcrRunOptions): Promise<OcrRunResult>;
   updateTextUnitSource(textUnitId: string, input: UpdateTextUnitSourceInput): Promise<TextUnit>;
   updateFinalTranslation(textUnitId: string, text: string): Promise<TextUnit>;

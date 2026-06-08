@@ -1,8 +1,10 @@
 const fs = require("node:fs/promises");
+const os = require("node:os");
 const path = require("node:path");
 const { commandExists, runProcess } = require("./process-utils.cjs");
 
 const PYTHON_BRIDGE = path.join(__dirname, "python_ocr_bridge.py");
+const CROP_IMAGE_SCRIPT = path.join(__dirname, "scripts", "crop-image.ps1");
 const WINDOWS_OCR_SCRIPT = path.join(__dirname, "scripts", "windows-ocr.ps1");
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -12,7 +14,7 @@ const OCR_PROVIDERS = [
     label: "Windows OCR",
     engine: "windows-media-ocr",
     kind: "local",
-    supportsRegions: false,
+    supportsRegions: true,
     setup: "Install the OCR language pack in Windows Settings if this provider is unavailable.",
   },
   {
@@ -20,7 +22,7 @@ const OCR_PROVIDERS = [
     label: "PaddleOCR",
     engine: "paddleocr-python",
     kind: "local",
-    supportsRegions: false,
+    supportsRegions: true,
     setup: "Install Python packages: pip install paddleocr paddlepaddle",
   },
   {
@@ -28,7 +30,7 @@ const OCR_PROVIDERS = [
     label: "Tesseract",
     engine: "tesseract-cli",
     kind: "local",
-    supportsRegions: false,
+    supportsRegions: true,
     setup: "Install Tesseract and put tesseract.exe on PATH.",
   },
   {
@@ -36,7 +38,7 @@ const OCR_PROVIDERS = [
     label: "EasyOCR",
     engine: "easyocr-python",
     kind: "local",
-    supportsRegions: false,
+    supportsRegions: true,
     setup: "Install Python package: pip install easyocr",
   },
   {
@@ -44,7 +46,7 @@ const OCR_PROVIDERS = [
     label: "Manga OCR",
     engine: "manga-ocr-python",
     kind: "local",
-    supportsRegions: false,
+    supportsRegions: true,
     setup: "Install Python package: pip install manga-ocr",
   },
   {
@@ -52,7 +54,7 @@ const OCR_PROVIDERS = [
     label: "Azure AI Vision Read",
     engine: "azure-computer-vision-read",
     kind: "cloud",
-    supportsRegions: false,
+    supportsRegions: true,
     setup: "Set AZURE_AI_VISION_ENDPOINT and AZURE_AI_VISION_KEY environment variables.",
   },
   {
@@ -60,7 +62,7 @@ const OCR_PROVIDERS = [
     label: "Google Cloud Vision",
     engine: "google-cloud-vision-rest",
     kind: "cloud",
-    supportsRegions: false,
+    supportsRegions: true,
     setup: "Set GOOGLE_CLOUD_VISION_API_KEY environment variable.",
   },
 ];
@@ -131,6 +133,118 @@ function normalizeRegion(region, pageWidth, pageHeight) {
     width: width > 0 ? width : pageWidth,
     height: height > 0 ? height : pageHeight,
   };
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function normalizeCropRect(region, page) {
+  const x = clamp(Math.floor(Number(region?.x ?? 0)), 0, Math.max(0, page.width - 1));
+  const y = clamp(Math.floor(Number(region?.y ?? 0)), 0, Math.max(0, page.height - 1));
+  const right = clamp(
+    Math.ceil(Number(region?.x ?? 0) + Number(region?.width ?? page.width)),
+    x + 1,
+    page.width,
+  );
+  const bottom = clamp(
+    Math.ceil(Number(region?.y ?? 0) + Number(region?.height ?? page.height)),
+    y + 1,
+    page.height,
+  );
+
+  return {
+    x,
+    y,
+    width: Math.max(1, right - x),
+    height: Math.max(1, bottom - y),
+  };
+}
+
+async function cropWithNativeImage(sourcePath, outputPath, cropRect) {
+  let nativeImage;
+  try {
+    nativeImage = require("electron").nativeImage;
+  } catch {
+    nativeImage = null;
+  }
+  if (!nativeImage?.createFromPath) return false;
+
+  const source = nativeImage.createFromPath(sourcePath);
+  if (source.isEmpty()) return false;
+  const cropped = source.crop(cropRect);
+  if (cropped.isEmpty()) return false;
+
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.writeFile(outputPath, cropped.toPNG());
+  return true;
+}
+
+async function cropWithPowerShell(sourcePath, outputPath, cropRect) {
+  const result = await runProcess(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      CROP_IMAGE_SCRIPT,
+      "-SourcePath",
+      sourcePath,
+      "-OutputPath",
+      outputPath,
+      "-X",
+      String(cropRect.x),
+      "-Y",
+      String(cropRect.y),
+      "-Width",
+      String(cropRect.width),
+      "-Height",
+      String(cropRect.height),
+    ],
+    { timeoutMs: 30_000 },
+  );
+  if (!result.ok) {
+    throw new Error(result.stderr.trim() || result.stdout.trim() || "Image crop failed.");
+  }
+}
+
+async function cropPageForRegion(page, region) {
+  const cropRect = normalizeCropRect(region, page);
+  const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "floris-ocr-region-"));
+  const outputPath = path.join(tempDirectory, "region.png");
+
+  const nativeCropOk = await cropWithNativeImage(page.imagePath, outputPath, cropRect);
+  if (!nativeCropOk) {
+    await cropWithPowerShell(page.imagePath, outputPath, cropRect);
+  }
+
+  return {
+    cleanup: () => fs.rm(tempDirectory, { recursive: true, force: true }),
+    cropRect,
+    page: {
+      ...page,
+      imagePath: outputPath,
+      width: cropRect.width,
+      height: cropRect.height,
+    },
+  };
+}
+
+function offsetItemsToOriginalPage(items, cropRect, page) {
+  return items.map((item) => ({
+    ...item,
+    pageId: page.pageId,
+    region: normalizeRegion(
+      {
+        ...item.region,
+        x: item.region.x + cropRect.x,
+        y: item.region.y + cropRect.y,
+      },
+      page.width,
+      page.height,
+    ),
+  }));
 }
 
 function regionRight(item) {
@@ -499,6 +613,20 @@ class OcrProviderRegistry {
     if (providerId === "azure-read") return this.runAzureRead(page, options);
     if (providerId === "google-vision") return this.runGoogleVision(page);
     throw new Error(`OCR provider is not implemented: ${providerId}`);
+  }
+
+  async recognizeRegion(providerId, page, region, options = {}) {
+    const cropped = await cropPageForRegion(page, region);
+    try {
+      const result = await this.recognizePage(providerId, cropped.page, options);
+      return {
+        cropRect: cropped.cropRect,
+        languageDetected: result.languageDetected,
+        items: offsetItemsToOriginalPage(result.items, cropped.cropRect, page),
+      };
+    } finally {
+      await cropped.cleanup();
+    }
   }
 
   async runWindowsOcr(page, options) {

@@ -333,6 +333,18 @@ export interface OcrRunOptions {
   replaceExisting?: boolean;
 }
 
+export interface OcrRegionExpansion {
+  bottom: number;
+  left: number;
+  right: number;
+  top: number;
+}
+
+export interface OcrRegionRunOptions extends OcrRunOptions {
+  expansion: OcrRegionExpansion;
+  region: RegionBox;
+}
+
 export interface OcrRunResult {
   averageConfidence: number | null;
   candidatesCreated: number;

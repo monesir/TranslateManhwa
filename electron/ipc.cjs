@@ -30,6 +30,7 @@ function registerIpcHandlers(appApi) {
       appApi.prepareLibraryChapter(chapterId),
     "ocr:listProviders": (_event, languageHint) => appApi.listOcrProviders(languageHint),
     "ocr:runPage": (_event, pageId, input) => appApi.runOcrForPage(pageId, input),
+    "ocr:runRegion": (_event, pageId, input) => appApi.runOcrForRegion(pageId, input),
     "ocr:runChapter": (_event, chapterId, input) =>
       appApi.runOcrForChapter(chapterId, input),
     "ocr:updateTextUnitSource": (_event, textUnitId, input) =>
