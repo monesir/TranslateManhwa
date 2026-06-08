@@ -783,6 +783,7 @@ function SourceChapterRow({
 
 function ProjectPage() {
   const { projectId } = useParams();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<"overview" | "chapters" | "dictionary">("chapters");
   const overviewQuery = useQuery({
     queryKey: ["project-overview", projectId],
@@ -795,6 +796,11 @@ function ProjectPage() {
 
   return (
     <section className="page">
+      <button className="inline-back" onClick={() => navigate("/library")}>
+        <ArrowLeft size={16} />
+        Back to Library
+      </button>
+
       <header className="project-hero">
         <SourceCover imageUrl={overview.coverUrl} title={overview.title} />
         <div>
