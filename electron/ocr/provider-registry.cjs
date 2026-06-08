@@ -133,8 +133,97 @@ function normalizeRegion(region, pageWidth, pageHeight) {
   };
 }
 
+function regionRight(item) {
+  return item.region.x + item.region.width;
+}
+
+function regionBottom(item) {
+  return item.region.y + item.region.height;
+}
+
+function horizontalOverlapRatio(first, second) {
+  const overlap = Math.max(
+    0,
+    Math.min(regionRight(first), regionRight(second)) - Math.max(first.region.x, second.region.x),
+  );
+  const minWidth = Math.max(1, Math.min(first.region.width, second.region.width));
+  return overlap / minWidth;
+}
+
+function centerX(item) {
+  return item.region.x + item.region.width / 2;
+}
+
+function shouldMergeOcrLine(previous, current, page) {
+  const verticalGap = current.region.y - regionBottom(previous);
+  if (verticalGap < -Math.max(previous.region.height, current.region.height) * 0.35) return false;
+
+  const averageHeight = (previous.region.height + current.region.height) / 2;
+  const maxLineGap = Math.max(18, Math.min(54, averageHeight * 1.45));
+  if (verticalGap > maxLineGap) return false;
+
+  const centerDistance = Math.abs(centerX(previous) - centerX(current));
+  const maxCenterDistance = Math.max(
+    42,
+    Math.min(page.width * 0.14, Math.max(previous.region.width, current.region.width) * 0.48),
+  );
+  const overlapRatio = horizontalOverlapRatio(previous, current);
+
+  return overlapRatio >= 0.22 || centerDistance <= maxCenterDistance;
+}
+
+function mergeOcrGroup(group, pageId) {
+  const left = Math.min(...group.map((item) => item.region.x));
+  const top = Math.min(...group.map((item) => item.region.y));
+  const right = Math.max(...group.map(regionRight));
+  const bottom = Math.max(...group.map(regionBottom));
+  const confidenceValues = group
+    .map((item) => item.confidence)
+    .filter((value) => typeof value === "number" && Number.isFinite(value));
+
+  return {
+    confidence: confidenceValues.length > 0
+      ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
+      : null,
+    pageId,
+    providerItemId: group
+      .map((item) => item.providerItemId)
+      .filter(Boolean)
+      .join(",") || null,
+    readingOrder: group[0]?.readingOrder ?? 1,
+    region: {
+      type: "box",
+      x: left,
+      y: top,
+      width: Math.max(1, right - left),
+      height: Math.max(1, bottom - top),
+    },
+    text: group.map((item) => item.text).join("\n"),
+  };
+}
+
+function mergeOcrLines(items, page) {
+  if (items.length <= 1) return items;
+
+  const merged = [];
+  let currentGroup = [items[0]];
+
+  for (const item of items.slice(1)) {
+    const previous = currentGroup[currentGroup.length - 1];
+    if (shouldMergeOcrLine(previous, item, page)) {
+      currentGroup.push(item);
+    } else {
+      merged.push(mergeOcrGroup(currentGroup, page.pageId));
+      currentGroup = [item];
+    }
+  }
+
+  merged.push(mergeOcrGroup(currentGroup, page.pageId));
+  return merged.map((item, index) => ({ ...item, readingOrder: index + 1 }));
+}
+
 function normalizeItems(rawItems, page) {
-  return (Array.isArray(rawItems) ? rawItems : [])
+  const items = (Array.isArray(rawItems) ? rawItems : [])
     .map((item, index) => ({
       confidence: typeof item.confidence === "number" ? item.confidence : null,
       pageId: page.pageId,
@@ -149,6 +238,8 @@ function normalizeItems(rawItems, page) {
       if (Math.abs(a.region.y - b.region.y) > 12) return a.region.y - b.region.y;
       return a.region.x - b.region.x;
     });
+
+  return mergeOcrLines(items, page);
 }
 
 function parseJsonOutput(result, providerId) {
