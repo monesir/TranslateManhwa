@@ -1275,6 +1275,12 @@ h3 {
   font-style: normal;
 }
 
+.dictionary-match small {
+  grid-column: 2;
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
 .warning-line {
   margin-top: 8px;
   padding: 8px;
@@ -1311,6 +1317,17 @@ h3 {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
+}
+
+.text-unit-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-button.danger:hover:not(:disabled) {
+  border-color: rgba(228, 134, 134, 0.55);
+  background: rgba(228, 134, 134, 0.12);
 }
 
 .text-unit-meta,

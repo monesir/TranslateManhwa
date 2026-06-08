@@ -37,6 +37,8 @@ function registerIpcHandlers(appApi) {
       appApi.updateTextUnitSource(textUnitId, input),
     "data:updateFinalTranslation": (_event, textUnitId, text) =>
       appApi.updateFinalTranslation(textUnitId, text),
+    "data:deleteTextUnit": (_event, textUnitId) =>
+      appApi.deleteTextUnit(textUnitId),
     "data:addCharacter": (_event, projectId, input) => appApi.addCharacter(projectId, input),
     "data:updateCharacter": (_event, characterId, input) =>
       appApi.updateCharacter(characterId, input),

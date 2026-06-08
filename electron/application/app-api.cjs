@@ -66,6 +66,10 @@ function createAppApi(db, options = {}) {
       return translationWorkspaceRepository.updateFinalTranslation(textUnitId, text);
     },
 
+    deleteTextUnit(textUnitId) {
+      return translationWorkspaceRepository.deleteTextUnit(textUnitId);
+    },
+
     listOcrProviders(languageHint) {
       return ocrService.listProviders(languageHint);
     },

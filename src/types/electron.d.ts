@@ -49,6 +49,7 @@ interface FlorisApi {
   runOcrForChapter(chapterId: string, input: OcrRunOptions): Promise<OcrRunResult>;
   updateTextUnitSource(textUnitId: string, input: UpdateTextUnitSourceInput): Promise<TextUnit>;
   updateFinalTranslation(textUnitId: string, text: string): Promise<TextUnit>;
+  deleteTextUnit(textUnitId: string): Promise<{ chapterId: string; id: string }>;
   addCharacter(projectId: string, input: CharacterInput): Promise<Character>;
   updateCharacter(
     characterId: string,

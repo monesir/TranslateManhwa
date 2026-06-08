@@ -15,13 +15,66 @@ const CHAPTERS_PAGE_LIMIT = 500;
 const MANGABAT_JSON_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-  Accept: "application/json",
+  Accept: "application/json, text/javascript, */*; q=0.01",
+  Referer: `${BASE_URL}/`,
+  "X-Requested-With": "XMLHttpRequest",
 };
 
 function slugFromUrl(url) {
   const parts = String(url).replace(/\/$/, "").split("/");
   const raw = parts[parts.length - 1] || url;
   return raw.replace(/[\u2018\u2019\u0060\u00B4']/g, "");
+}
+
+function searchAlias(value) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[!@%^*()+=<>\?/,\.:;' "\&#\[\]~\-\$_]+/g, "_")
+    .replace(/_+_/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function normalizedSearchText(value) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function searchScore(item, query) {
+  const name = normalizedSearchText(item.name);
+  const normalizedQuery = normalizedSearchText(query);
+  if (!name || !normalizedQuery) return 50;
+  if (name === normalizedQuery) return 0;
+  if (name.startsWith(normalizedQuery)) return 1;
+  if (name.split(" ").includes(normalizedQuery)) return 2;
+  if (name.includes(normalizedQuery)) return 3;
+  return 10;
+}
+
+function mapAutocompleteItem(item) {
+  const url = String(item?.url ?? "");
+  const slug = String(item?.slug ?? "").trim() || slugFromUrl(url);
+  const name = trimText(item?.name);
+  if (!slug || !name) return null;
+
+  return {
+    titleId: slug,
+    slug,
+    name,
+    coverUrl: item?.thumb || `https://img-r1.2xstorage.com/thumb/${slug}.webp`,
+    bannerUrl: null,
+    canonicalUrl: url || `${BASE_URL}/manga/${slug}`,
+    status: "unknown",
+    statusLabel: null,
+    tags: [],
+    latestChapterLabel: trimText(item?.chapterLatest) || null,
+    descriptionSnippet: trimText(item?.author) || null,
+  };
 }
 
 async function browse(page = 1) {
@@ -68,10 +121,37 @@ async function browse(page = 1) {
 }
 
 async function search(query, page = 1) {
-  const normalizedQuery = String(query ?? "").trim().toLowerCase();
+  const rawQuery = String(query ?? "").trim();
+  const normalizedQuery = rawQuery.toLowerCase();
   const numericPage = Number.isFinite(Number(page)) && Number(page) > 0 ? Math.floor(Number(page)) : 1;
 
   if (!normalizedQuery) return emptyPageResult(numericPage);
+
+  try {
+    const autocompleteUrl = new URL("/home/search/json", BASE_URL);
+    autocompleteUrl.searchParams.set("searchword", searchAlias(rawQuery));
+    const autocompleteResponse = await fetch(autocompleteUrl, { headers: MANGABAT_JSON_HEADERS });
+
+    if (!autocompleteResponse.ok) {
+      throw new Error(`MangaBat autocomplete search failed: ${autocompleteResponse.status}`);
+    }
+
+    const data = await autocompleteResponse.json();
+    const autocompleteResults = (Array.isArray(data) ? data : [])
+      .map(mapAutocompleteItem)
+      .filter(Boolean)
+      .sort((first, second) => searchScore(first, rawQuery) - searchScore(second, rawQuery));
+
+    if (autocompleteResults.length > 0) {
+      return {
+        items: numericPage === 1 ? autocompleteResults : [],
+        page: numericPage,
+        hasNextPage: false,
+      };
+    }
+  } catch {
+    // Fall back to the public search page below; it is sometimes blocked by Cloudflare.
+  }
 
   try {
     const searchUrl = `${BASE_URL}/search/story/${encodeURIComponent(normalizedQuery)}?page=${numericPage}`;
@@ -119,10 +199,13 @@ async function search(query, page = 1) {
       hasNextPage: nextPageLink.length > 0,
     };
   } catch {
-    const browseResult = await browse(1);
-    const filtered = browseResult.items.filter((item) => item.name.toLowerCase().includes(normalizedQuery));
+    const browsePages = await Promise.all([1, 2, 3].map((fallbackPage) => browse(fallbackPage).catch(() => null)));
+    const filtered = browsePages
+      .flatMap((result) => result?.items ?? [])
+      .filter((item) => normalizedSearchText(item.name).includes(normalizedSearchText(rawQuery)))
+      .sort((first, second) => searchScore(first, rawQuery) - searchScore(second, rawQuery));
     return {
-      items: filtered,
+      items: numericPage === 1 ? filtered : [],
       page: numericPage,
       hasNextPage: false,
     };

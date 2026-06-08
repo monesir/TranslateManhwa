@@ -560,6 +560,28 @@ export async function updateFinalTranslation(textUnitId: string, text: string): 
   return delay(updated, 80);
 }
 
+export async function deleteTextUnit(textUnitId: string): Promise<{ chapterId: string; id: string }> {
+  if (window.florisApi) return window.florisApi.deleteTextUnit(textUnitId);
+
+  const existing = mutableTextUnits.find((unit) => unit.id === textUnitId);
+  if (!existing) throw new Error("Text unit not found");
+
+  mutableTextUnits = mutableTextUnits
+    .filter((unit) => unit.id !== textUnitId)
+    .map((unit) =>
+      unit.chapterId === existing.chapterId && unit.order > existing.order
+        ? { ...unit, order: unit.order - 1 }
+        : unit,
+    );
+  mutableChapters = mutableChapters.map((chapter) =>
+    chapter.id === existing.chapterId
+      ? { ...chapter, textUnitsCount: Math.max(0, chapter.textUnitsCount - 1), updatedAt: new Date().toISOString() }
+      : chapter,
+  );
+
+  return delay({ chapterId: existing.chapterId, id: textUnitId }, 80);
+}
+
 export async function addCharacter(
   projectId: string,
   input: CharacterInput,

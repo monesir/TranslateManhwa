@@ -67,6 +67,7 @@ import {
   createProject,
   deleteCharacter,
   deleteGlossaryTerm,
+  deleteTextUnit,
   ensureSourceProject,
   getChapterForTranslation,
   getExplorerSeriesDetails,
@@ -202,6 +203,43 @@ function normalizeSelectionRegion(selection: OcrSelectionState | null): RegionBo
     width,
     height,
   };
+}
+
+function normalizeDictionarySearchText(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function dictionaryTextIncludes(haystack: string, needle: string) {
+  const normalizedNeedle = normalizeDictionarySearchText(needle);
+  if (normalizedNeedle.length < 2) return false;
+  return normalizeDictionarySearchText(haystack).includes(normalizedNeedle);
+}
+
+function dictionaryTextForUnit(unit?: TextUnit) {
+  if (!unit) return "";
+  return [
+    unit.sourceText,
+    unit.finalTranslation,
+    unit.aiTranslation,
+    unit.microsoftTranslation,
+  ].join("\n");
+}
+
+function characterMatchesText(character: Character, text: string) {
+  return [
+    character.englishName,
+    character.arabicName,
+    ...character.aliases.flatMap((alias) => [alias.english, alias.arabic]),
+  ].some((value) => dictionaryTextIncludes(text, value));
+}
+
+function glossaryTermMatchesText(term: GlossaryTerm, text: string) {
+  return [term.englishTerm, term.arabicTerm].some((value) => dictionaryTextIncludes(text, value));
 }
 
 const DEFAULT_OCR_REGION_EXPANSION: OcrRegionExpansion = {
@@ -1245,11 +1283,29 @@ function SourceChapterRow({
 function ProjectPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"overview" | "chapters" | "dictionary">("chapters");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const requestedTab =
+    tabParam === "overview" || tabParam === "dictionary" || tabParam === "chapters" ? tabParam : "chapters";
+  const [tab, setTab] = useState<"overview" | "chapters" | "dictionary">(requestedTab);
   const overviewQuery = useQuery({
     queryKey: ["project-overview", projectId],
     queryFn: () => getProjectOverview(projectId ?? ""),
   });
+
+  useEffect(() => {
+    setTab(requestedTab);
+  }, [requestedTab]);
+
+  const selectTab = (nextTab: "overview" | "chapters" | "dictionary") => {
+    setTab(nextTab);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("tab", nextTab);
+      if (nextTab !== "dictionary") next.delete("section");
+      return next;
+    }, { replace: true });
+  };
 
   const overview = overviewQuery.data;
   if (overviewQuery.isLoading) return <LoadingPanel label="Loading project" />;
@@ -1277,13 +1333,13 @@ function ProjectPage() {
       </header>
 
       <div className="tabs">
-        <button className={tab === "chapters" ? "active" : ""} onClick={() => setTab("chapters")}>
+        <button className={tab === "chapters" ? "active" : ""} onClick={() => selectTab("chapters")}>
           Chapters
         </button>
-        <button className={tab === "dictionary" ? "active" : ""} onClick={() => setTab("dictionary")}>
+        <button className={tab === "dictionary" ? "active" : ""} onClick={() => selectTab("dictionary")}>
           Dictionary
         </button>
-        <button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>
+        <button className={tab === "overview" ? "active" : ""} onClick={() => selectTab("overview")}>
           Overview
         </button>
       </div>
@@ -1585,7 +1641,10 @@ function ChapterRow({
 }
 
 function DictionaryTab({ projectId }: { projectId: string }) {
-  const [section, setSection] = useState<"characters" | "glossary">("characters");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sectionParam = searchParams.get("section");
+  const requestedSection = sectionParam === "glossary" || sectionParam === "characters" ? sectionParam : "characters";
+  const [section, setSection] = useState<"characters" | "glossary">(requestedSection);
   const [searchValue, setSearchValue] = useState("");
   const [genderFilter, setGenderFilter] = useState<Gender | "All">("All");
   const [categoryFilter, setCategoryFilter] = useState("All");
@@ -1598,6 +1657,20 @@ function DictionaryTab({ projectId }: { projectId: string }) {
     queryKey: ["project-dictionary", projectId],
     queryFn: () => getProjectDictionary(projectId),
   });
+
+  useEffect(() => {
+    setSection(requestedSection);
+  }, [requestedSection]);
+
+  const selectSection = (nextSection: "characters" | "glossary") => {
+    setSection(nextSection);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("tab", "dictionary");
+      next.set("section", nextSection);
+      return next;
+    }, { replace: true });
+  };
 
   const refreshDictionary = () => {
     queryClient.invalidateQueries({ queryKey: ["project-dictionary", projectId] });
@@ -1770,10 +1843,10 @@ function DictionaryTab({ projectId }: { projectId: string }) {
   return (
     <div className="dictionary-view">
       <div className="subtabs">
-        <button className={section === "characters" ? "active" : ""} onClick={() => setSection("characters")}>
+        <button className={section === "characters" ? "active" : ""} onClick={() => selectSection("characters")}>
           Characters
         </button>
-        <button className={section === "glossary" ? "active" : ""} onClick={() => setSection("glossary")}>
+        <button className={section === "glossary" ? "active" : ""} onClick={() => selectSection("glossary")}>
           General Glossary
         </button>
       </div>
@@ -2164,6 +2237,18 @@ function TranslationPage() {
       queryClient.invalidateQueries({ queryKey: ["translation-workspace", chapterId] });
     },
   });
+  const deleteTextUnitMutation = useMutation({
+    mutationFn: (textUnitId: string) => deleteTextUnit(textUnitId),
+    onSuccess: (_result, deletedTextUnitId) => {
+      const units = workspace?.textUnits ?? [];
+      const deletedIndex = units.findIndex((unit) => unit.id === deletedTextUnitId);
+      const nextUnit = units[deletedIndex + 1] ?? units[deletedIndex - 1];
+      setSelectedTextUnitId(nextUnit?.id ?? "");
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+  });
   const runPageOcrMutation = useMutation({
     mutationFn: ({ pageId, input }: { pageId: string; input: OcrRunOptions }) =>
       runOcrForPage(pageId, input),
@@ -2245,11 +2330,14 @@ function TranslationPage() {
   const selectedTextUnit =
     workspace.textUnits.find((unit) => unit.id === selectedTextUnitId) ?? workspace.textUnits[0];
 
+  const selectedDictionaryText = dictionaryTextForUnit(selectedTextUnit);
+  const matchedCharacterIdSet = new Set(selectedTextUnit?.matchedCharacterIds ?? []);
+  const matchedTermIdSet = new Set(selectedTextUnit?.matchedGlossaryTermIds ?? []);
   const matchedCharacters = workspace.characters.filter((character) =>
-    selectedTextUnit?.matchedCharacterIds.includes(character.id),
+    matchedCharacterIdSet.has(character.id) || characterMatchesText(character, selectedDictionaryText),
   );
   const matchedTerms = workspace.glossaryTerms.filter((term) =>
-    selectedTextUnit?.matchedGlossaryTermIds.includes(term.id),
+    matchedTermIdSet.has(term.id) || glossaryTermMatchesText(term, selectedDictionaryText),
   );
   const selectPage = (pageId: string) => {
     setSelectedPageId(pageId);
@@ -2451,7 +2539,12 @@ function TranslationPage() {
 
       <div className="translation-layout">
         <aside className="translation-left">
-          <MiniDictionary characters={matchedCharacters} terms={matchedTerms} selectedTextUnit={selectedTextUnit} />
+          <MiniDictionary
+            characters={matchedCharacters}
+            projectId={workspace.project.id}
+            terms={matchedTerms}
+            selectedTextUnit={selectedTextUnit}
+          />
           {selectedProvider && !selectedProvider.available ? (
             <p className="ocr-status-line">{selectedProvider.reason ?? selectedProvider.setup}</p>
           ) : null}
@@ -2471,6 +2564,8 @@ function TranslationPage() {
                 onSourceChange={(sourceText, sourceStatus) =>
                   sourceMutation.mutate({ id: unit.id, sourceStatus, sourceText })
                 }
+                onDelete={() => deleteTextUnitMutation.mutate(unit.id)}
+                isDeleting={deleteTextUnitMutation.isPending && deleteTextUnitMutation.variables === unit.id}
               />
             ))}
           </div>
@@ -2690,10 +2785,12 @@ function TranslationPage() {
 
 function MiniDictionary({
   characters,
+  projectId,
   terms,
   selectedTextUnit,
 }: {
   characters: Character[];
+  projectId: string;
   terms: GlossaryTerm[];
   selectedTextUnit?: TextUnit;
 }) {
@@ -2706,8 +2803,20 @@ function MiniDictionary({
       <div className="panel-title">
         <h2>Mini Dictionary</h2>
         <div>
-          <button className="icon-button" title="Add character"><Plus size={15} /></button>
-          <button className="icon-button" title="Add term"><BookOpen size={15} /></button>
+          <Link
+            className="icon-button"
+            title="Open characters dictionary"
+            to={`/projects/${projectId}?tab=dictionary&section=characters`}
+          >
+            <Plus size={15} />
+          </Link>
+          <Link
+            className="icon-button"
+            title="Open glossary dictionary"
+            to={`/projects/${projectId}?tab=dictionary&section=glossary`}
+          >
+            <BookOpen size={15} />
+          </Link>
         </div>
       </div>
       {characters.length === 0 && terms.length === 0 ? <p className="muted">No matches for selected text.</p> : null}
@@ -2716,6 +2825,11 @@ function MiniDictionary({
           <span>Character</span>
           <strong>{character.englishName}</strong>
           <em dir="rtl">{character.arabicName}</em>
+          {character.aliases.length > 0 ? (
+            <small title={character.aliases.map((alias) => `${alias.english} / ${alias.arabic}`).join(", ")}>
+              {character.aliases.length} aliases
+            </small>
+          ) : null}
         </div>
       ))}
       {terms.map((term) => (
@@ -2735,14 +2849,18 @@ function MiniDictionary({
 }
 
 function TextUnitCard({
+  isDeleting,
   unit,
   selected,
+  onDelete,
   onSelect,
   onFinalChange,
   onSourceChange,
 }: {
+  isDeleting: boolean;
   unit: TextUnit;
   selected: boolean;
+  onDelete: () => void;
   onSelect: () => void;
   onFinalChange: (text: string) => void;
   onSourceChange: (sourceText: string, sourceStatus: OcrSourceStatus) => void;
@@ -2770,7 +2888,21 @@ function TextUnitCard({
     <article className={selected ? "text-unit-card selected" : "text-unit-card"} onClick={onSelect}>
       <div className="text-unit-head">
         <strong>#{unit.order}</strong>
-        <span className={`status-chip ${statusClass(unit.sourceStatus)}`}>{unit.sourceStatus}</span>
+        <div className="text-unit-head-actions">
+          <span className={`status-chip ${statusClass(unit.sourceStatus)}`}>{unit.sourceStatus}</span>
+          <button
+            className="icon-button danger"
+            disabled={isDeleting}
+            title="Delete OCR result"
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (window.confirm("Delete this OCR result?")) onDelete();
+            }}
+          >
+            {isDeleting ? <RefreshCw className="spin" size={15} /> : <Trash2 size={15} />}
+          </button>
+        </div>
       </div>
       <div className="text-unit-meta">
         <span>{unit.ocrProvider ?? "Manual"}</span>

@@ -199,6 +199,58 @@ class TranslationWorkspaceRepository {
 
     return mapTextUnitRow(updated);
   }
+
+  deleteTextUnit(textUnitId) {
+    const existing = this.db.prepare(`
+      SELECT id, chapter_id
+      FROM text_units
+      WHERE id = ?
+    `).get(textUnitId);
+
+    if (!existing) {
+      throw new Error("Text unit not found");
+    }
+
+    const timestamp = new Date().toISOString();
+
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare("UPDATE ocr_candidates SET text_unit_id = NULL WHERE text_unit_id = ?").run(textUnitId);
+      this.db.prepare("DELETE FROM text_units WHERE id = ?").run(textUnitId);
+
+      const remaining = this.db.prepare(`
+        SELECT id
+        FROM text_units
+        WHERE chapter_id = ?
+        ORDER BY unit_order ASC, created_at ASC, id ASC
+      `).all(existing.chapter_id);
+
+      for (const [index, row] of remaining.entries()) {
+        this.db.prepare("UPDATE text_units SET unit_order = ?, updated_at = ? WHERE id = ?").run(
+          index + 1,
+          timestamp,
+          row.id,
+        );
+      }
+
+      this.db.prepare("UPDATE chapters SET updated_at = ? WHERE id = ?").run(timestamp, existing.chapter_id);
+      this.db.prepare(`
+        UPDATE projects
+        SET updated_at = ?
+        WHERE id = (SELECT project_id FROM chapters WHERE id = ?)
+      `).run(timestamp, existing.chapter_id);
+
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    return {
+      chapterId: existing.chapter_id,
+      id: textUnitId,
+    };
+  }
 }
 
 module.exports = {
