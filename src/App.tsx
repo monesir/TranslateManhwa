@@ -203,6 +203,13 @@ function normalizeSelectionRegion(selection: OcrSelectionState | null): RegionBo
   };
 }
 
+const DEFAULT_OCR_REGION_EXPANSION: OcrRegionExpansion = {
+  bottom: 12,
+  left: 12,
+  right: 40,
+  top: 12,
+};
+
 function defaultCreateProjectForm(): CreateProjectFormState {
   return {
     title: "",
@@ -2107,18 +2114,13 @@ function TranslationPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const ocrSelectionRef = useRef<OcrSelectionState | null>(null);
   const [viewerMode, setViewerMode] = useState<"page" | "webtoon">("page");
   const [mergePages, setMergePages] = useState(false);
   const [ocrProviderId, setOcrProviderId] = useState<OcrProviderId>("windows");
   const [ocrLanguageHint, setOcrLanguageHint] = useState("");
   const [replaceOcrText, setReplaceOcrText] = useState(true);
   const [ocrSelection, setOcrSelection] = useState<OcrSelectionState | null>(null);
-  const [ocrExpansion, setOcrExpansion] = useState<OcrRegionExpansion>({
-    bottom: 12,
-    left: 12,
-    right: 40,
-    top: 12,
-  });
   const {
     selectedPageId,
     selectedTextUnitId,
@@ -2176,6 +2178,7 @@ function TranslationPage() {
       queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
       queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+      ocrSelectionRef.current = null;
       setOcrSelection(null);
     },
   });
@@ -2228,6 +2231,7 @@ function TranslationPage() {
 
   useEffect(() => {
     if (ocrSelection && !workspace?.pages.some((page) => page.id === ocrSelection.pageId)) {
+      ocrSelectionRef.current = null;
       setOcrSelection(null);
     }
   }, [ocrSelection, workspace?.pages]);
@@ -2280,20 +2284,26 @@ function TranslationPage() {
     if (!currentPage || isOcrRunning) return;
     runPageOcrMutation.mutate({ input: ocrInput, pageId: currentPage.id });
   };
-  const runSelectedRegionOcr = () => {
-    if (!selectedOcrRegion || !ocrSelection || isOcrRunning) return;
+  const runOcrSelection = (selection: OcrSelectionState) => {
+    const region = normalizeSelectionRegion(selection);
+    if (!region || isOcrRunning || !selectedProvider?.available) return;
     runRegionOcrMutation.mutate({
       input: {
         ...ocrInput,
-        expansion: ocrExpansion,
-        region: selectedOcrRegion,
+        expansion: DEFAULT_OCR_REGION_EXPANSION,
+        region,
       },
-      pageId: ocrSelection.pageId,
+      pageId: selection.pageId,
     });
   };
   const runWholeChapterOcr = () => {
     if (!chapterId || isOcrRunning) return;
     runChapterOcrMutation.mutate({ id: chapterId, input: ocrInput });
+  };
+  const startOcrTextSelection = () => {
+    ocrSelectionRef.current = null;
+    setOcrSelection(null);
+    setActiveTool("ocr");
   };
   const pointFromSvg = (event: PointerEvent<SVGSVGElement>, page: Page) => {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -2309,37 +2319,43 @@ function TranslationPage() {
     event.preventDefault();
     const point = pointFromSvg(event, page);
     event.currentTarget.setPointerCapture(event.pointerId);
-    setSelectedPageId(page.id);
-    setOcrSelection({
+    const selection = {
       pageId: page.id,
       startX: point.x,
       startY: point.y,
       currentX: point.x,
       currentY: point.y,
-    });
+    };
+    ocrSelectionRef.current = selection;
+    setSelectedPageId(page.id);
+    setOcrSelection(selection);
   };
   const moveOcrSelection = (event: PointerEvent<SVGSVGElement>, page: Page) => {
-    if (activeTool !== "ocr" || !ocrSelection || ocrSelection.pageId !== page.id) return;
+    const currentSelection = ocrSelectionRef.current;
+    if (activeTool !== "ocr" || !currentSelection || currentSelection.pageId !== page.id) return;
     event.preventDefault();
     const point = pointFromSvg(event, page);
-    setOcrSelection((current) =>
-      current && current.pageId === page.id
-        ? { ...current, currentX: point.x, currentY: point.y }
-        : current,
-    );
+    const nextSelection = { ...currentSelection, currentX: point.x, currentY: point.y };
+    ocrSelectionRef.current = nextSelection;
+    setOcrSelection(nextSelection);
   };
-  const endOcrSelection = (event: PointerEvent<SVGSVGElement>, page: Page) => {
-    if (activeTool !== "ocr" || !ocrSelection || ocrSelection.pageId !== page.id) return;
+  const endOcrSelection = (event: PointerEvent<SVGSVGElement>, page: Page, shouldRun = true) => {
+    const currentSelection = ocrSelectionRef.current;
+    if (activeTool !== "ocr" || !currentSelection || currentSelection.pageId !== page.id) return;
     event.preventDefault();
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     const point = pointFromSvg(event, page);
-    setOcrSelection((current) =>
-      current && current.pageId === page.id
-        ? { ...current, currentX: point.x, currentY: point.y }
-        : current,
-    );
+    const finalSelection = { ...currentSelection, currentX: point.x, currentY: point.y };
+    if (!normalizeSelectionRegion(finalSelection)) {
+      ocrSelectionRef.current = null;
+      setOcrSelection(null);
+      return;
+    }
+    ocrSelectionRef.current = finalSelection;
+    setOcrSelection(finalSelection);
+    if (shouldRun) runOcrSelection(finalSelection);
   };
 
   return (
@@ -2394,20 +2410,11 @@ function TranslationPage() {
           <button
             className={activeTool === "ocr" ? "button secondary active-command" : "button secondary"}
             disabled={isOcrRunning}
-            onClick={() => setActiveTool("ocr")}
+            onClick={startOcrTextSelection}
             title="Enable OCR rectangle selection"
           >
             <Highlighter size={15} />
             Select text
-          </button>
-          <button
-            className="button secondary"
-            disabled={isOcrRunning || !selectedProvider?.available || !selectedOcrRegion}
-            onClick={runSelectedRegionOcr}
-            title={selectedOcrRegion ? "Run OCR on selected region" : "Select a text region with the OCR tool"}
-          >
-            <Eye size={15} />
-            Region OCR
           </button>
           <button
             className="button secondary"
@@ -2522,7 +2529,7 @@ function TranslationPage() {
                   onPointerDown={(event) => beginOcrSelection(event, currentPage)}
                   onPointerMove={(event) => moveOcrSelection(event, currentPage)}
                   onPointerUp={(event) => endOcrSelection(event, currentPage)}
-                  onPointerCancel={(event) => endOcrSelection(event, currentPage)}
+                  onPointerCancel={(event) => endOcrSelection(event, currentPage, false)}
                 >
                   {pageTextUnits.map((unit) => (
                     <rect
@@ -2533,7 +2540,9 @@ function TranslationPage() {
                       height={unit.region.height}
                       rx={12}
                       className={unit.id === selectedTextUnit?.id ? "region selected" : "region"}
-                      onClick={() => setSelectedTextUnitId(unit.id)}
+                      onClick={() => {
+                        if (activeTool !== "ocr") setSelectedTextUnitId(unit.id);
+                      }}
                     />
                   ))}
                   {ocrSelection?.pageId === currentPage.id && selectedOcrRegion ? (
@@ -2583,7 +2592,7 @@ function TranslationPage() {
                           onPointerDown={(event) => beginOcrSelection(event, page)}
                           onPointerMove={(event) => moveOcrSelection(event, page)}
                           onPointerUp={(event) => endOcrSelection(event, page)}
-                          onPointerCancel={(event) => endOcrSelection(event, page)}
+                          onPointerCancel={(event) => endOcrSelection(event, page, false)}
                         >
                           {units.map((unit) => (
                             <rect
@@ -2594,7 +2603,9 @@ function TranslationPage() {
                               height={unit.region.height}
                               rx={12}
                               className={unit.id === selectedTextUnit?.id ? "region selected" : "region"}
-                              onClick={() => selectTextUnit(unit)}
+                              onClick={() => {
+                                if (activeTool !== "ocr") selectTextUnit(unit);
+                              }}
                             />
                           ))}
                           {ocrSelection?.pageId === page.id && selectedOcrRegion ? (
@@ -2636,62 +2647,6 @@ function TranslationPage() {
             activeTool={activeTool}
             setActiveTool={setActiveTool}
           />
-          <div className="tool-panel">
-            <div className="tool-panel-head">
-              <h3>OCR Region</h3>
-              <button
-                className="icon-button"
-                type="button"
-                title="Clear selected OCR region"
-                onClick={() => setOcrSelection(null)}
-                disabled={!ocrSelection}
-              >
-                <X size={14} />
-              </button>
-            </div>
-            <p>
-              {selectedOcrRegion
-                ? `${Math.round(selectedOcrRegion.width)} x ${Math.round(selectedOcrRegion.height)}`
-                : "Use the OCR tool and drag over text."}
-            </p>
-            <button
-              className={activeTool === "ocr" ? "button secondary full-width active-command" : "button secondary full-width"}
-              disabled={isOcrRunning}
-              onClick={() => setActiveTool("ocr")}
-              type="button"
-            >
-              <Highlighter size={15} />
-              Select text region
-            </button>
-            <div className="ocr-expansion-grid">
-              {(["left", "right", "top", "bottom"] as const).map((side) => (
-                <label className="form-field" key={side}>
-                  <span>{side}</span>
-                  <input
-                    min={0}
-                    max={240}
-                    type="number"
-                    value={ocrExpansion[side]}
-                    onChange={(event) =>
-                      setOcrExpansion((current) => ({
-                        ...current,
-                        [side]: Math.max(0, Number(event.target.value) || 0),
-                      }))
-                    }
-                  />
-                </label>
-              ))}
-            </div>
-            <button
-              className="button primary full-width"
-              disabled={isOcrRunning || !selectedProvider?.available || !selectedOcrRegion}
-              onClick={runSelectedRegionOcr}
-              type="button"
-            >
-              <Eye size={15} />
-              Run selected OCR
-            </button>
-          </div>
           <ToolGroup
             title="Translation"
             tools={[

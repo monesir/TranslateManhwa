@@ -1651,6 +1651,10 @@ h3 {
   cursor: crosshair;
 }
 
+.region-layer.is-selecting .region {
+  pointer-events: none;
+}
+
 .region {
   fill: rgba(58, 163, 159, 0.12);
   stroke: rgba(58, 163, 159, 0.85);
@@ -1681,18 +1685,6 @@ h3 {
   margin-bottom: 12px;
 }
 
-.tool-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.tool-panel-head h3 {
-  margin-bottom: 0;
-}
-
 .tool-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1718,25 +1710,6 @@ h3 {
 
 .tool-panel small {
   color: var(--accent);
-}
-
-.ocr-expansion-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin: 10px 0;
-}
-
-.ocr-expansion-grid .form-field {
-  gap: 5px;
-}
-
-.ocr-expansion-grid input {
-  height: 32px;
-}
-
-.button.full-width {
-  width: 100%;
 }
 
 .settings-grid {
