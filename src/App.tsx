@@ -3,6 +3,7 @@ import {
   BookOpen,
   Bot,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
@@ -36,7 +37,17 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  Navigate,
+  NavLink,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ReaderPage } from "./pages/ReaderPage";
 import {
@@ -74,6 +85,7 @@ import type {
   GlossaryTerm,
   Project,
   ProjectOverview,
+  SourceCatalogItem,
   SourceChapterSummary,
   SourceTitleSummary,
   TextUnit,
@@ -248,35 +260,154 @@ function EmptyPanel({ label }: { label: string }) {
   );
 }
 
+function sourceExplorerPath(sourceId: string) {
+  return `/explorer?source=${encodeURIComponent(sourceId)}`;
+}
+
+function SidebarGroupButton({
+  active,
+  expanded,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  expanded: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={active ? "sidebar-nav-item sidebar-nav-item--button active" : "sidebar-nav-item sidebar-nav-item--button"}
+      onClick={onClick}
+    >
+      <span className="sidebar-nav-item__main">
+        <span className="sidebar-nav-item__icon">{icon}</span>
+        <span>{label}</span>
+      </span>
+      <span className="sidebar-nav-item__chevron">
+        {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+      </span>
+    </button>
+  );
+}
+
+function SidebarSubLink({
+  active,
+  children,
+  to,
+}: {
+  active?: boolean;
+  children: ReactNode;
+  to: string;
+}) {
+  return (
+    <Link className={active ? "sidebar-subnav-item active" : "sidebar-subnav-item"} to={to}>
+      {children}
+    </Link>
+  );
+}
+
 function AppShell() {
   const runtimeLabel = window.florisApi ? "Electron runtime" : "Local UI build";
   const dataLabel = window.florisApi ? "SQLite data" : "No SQLite connection";
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [libraryExpanded, setLibraryExpanded] = useState(true);
+  const [explorerExpanded, setExplorerExpanded] = useState(true);
+  const catalogQuery = useQuery({
+    queryKey: ["source-catalog"],
+    queryFn: listSourceCatalog,
+    staleTime: 5 * 60_000,
+  });
+  const sources = catalogQuery.data ?? [];
+  const isLibraryView = location.pathname === "/library" || location.pathname.startsWith("/projects");
+  const isExplorerView = location.pathname.startsWith("/explorer");
+  const isSettingsView = location.pathname === "/settings";
+  const explorerPathParts = location.pathname.split("/").filter(Boolean);
+  const querySourceId = new URLSearchParams(location.search).get("source");
+  const activeExplorerSourceId =
+    explorerPathParts[0] === "explorer" && explorerPathParts.length >= 3
+      ? decodeURIComponent(explorerPathParts[1])
+      : querySourceId;
+
+  useEffect(() => {
+    if (isLibraryView) setLibraryExpanded(true);
+    if (isExplorerView) setExplorerExpanded(true);
+  }, [isExplorerView, isLibraryView]);
 
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
-        <div className="brand">
-          <div className="brand-mark">F</div>
-          <div>
-            <strong>Floris</strong>
-            <span>Translator</span>
+        <div className="sidebar-scroll">
+          <div className="sidebar-group">
+            <SidebarGroupButton
+              active={isLibraryView}
+              expanded={libraryExpanded}
+              icon={<LibraryIcon size={18} />}
+              label="Library"
+              onClick={() => {
+                navigate("/library");
+                setLibraryExpanded((value) => !value);
+              }}
+            />
+            {libraryExpanded ? (
+              <div className="sidebar-subnav">
+                <SidebarSubLink active={location.pathname === "/library"} to="/library">
+                  All Projects
+                </SidebarSubLink>
+              </div>
+            ) : null}
           </div>
-        </div>
 
-        <nav className="main-nav">
-          <NavLink to="/library">
-            <LibraryIcon size={18} />
-            Library
+          <div className="sidebar-group">
+            <SidebarGroupButton
+              active={isExplorerView}
+              expanded={explorerExpanded}
+              icon={<Compass size={18} />}
+              label="Explorer"
+              onClick={() => {
+                navigate(activeExplorerSourceId ? sourceExplorerPath(activeExplorerSourceId) : "/explorer");
+                setExplorerExpanded((value) => !value);
+              }}
+            />
+            {explorerExpanded ? (
+              <div className="sidebar-subnav">
+                {sources.map((source: SourceCatalogItem) => {
+                  const sourceId = source.metadata.sourceId;
+                  return (
+                    <SidebarSubLink
+                      active={isExplorerView && activeExplorerSourceId === sourceId}
+                      key={sourceId}
+                      to={sourceExplorerPath(sourceId)}
+                    >
+                      {source.metadata.displayName}
+                    </SidebarSubLink>
+                  );
+                })}
+                {sources.length === 0 ? (
+                  <SidebarSubLink active={isExplorerView && !activeExplorerSourceId} to="/explorer">
+                    All Sources
+                  </SidebarSubLink>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <NavLink
+            className={({ isActive }) =>
+              isActive || isSettingsView ? "sidebar-nav-item active" : "sidebar-nav-item"
+            }
+            to="/settings"
+          >
+            <span className="sidebar-nav-item__icon">
+              <Settings size={18} />
+            </span>
+            <span>Settings</span>
           </NavLink>
-          <NavLink to="/explorer">
-            <Compass size={18} />
-            Explorer
-          </NavLink>
-          <NavLink to="/settings">
-            <Settings size={18} />
-            Settings
-          </NavLink>
-        </nav>
+        </div>
 
         <div className="sidebar-status">
           <span>{runtimeLabel}</span>
@@ -401,8 +532,10 @@ function ProjectCard({ project }: { project: Project }) {
 }
 
 function ExplorerPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState("");
-  const [selectedSourceId, setSelectedSourceId] = useState<string>("");
+  const sourceParam = searchParams.get("source") ?? "";
+  const [selectedSourceId, setSelectedSourceId] = useState<string>(sourceParam);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const normalizedQuery = query.trim();
 
@@ -410,10 +543,23 @@ function ExplorerPage() {
   const sources = catalogQuery.data ?? [];
 
   useEffect(() => {
-    if (!selectedSourceId && sources.length > 0) {
-      setSelectedSourceId(sources[0].metadata.sourceId);
+    if (sourceParam && sourceParam !== selectedSourceId) {
+      setSelectedSourceId(sourceParam);
     }
-  }, [selectedSourceId, sources]);
+  }, [selectedSourceId, sourceParam]);
+
+  useEffect(() => {
+    if (!selectedSourceId && sources.length > 0) {
+      const fallbackSourceId = sources[0].metadata.sourceId;
+      setSelectedSourceId(fallbackSourceId);
+      setSearchParams({ source: fallbackSourceId }, { replace: true });
+    }
+  }, [selectedSourceId, setSearchParams, sources]);
+
+  function selectSource(sourceId: string) {
+    setSelectedSourceId(sourceId);
+    setSearchParams({ source: sourceId }, { replace: true });
+  }
 
   const titlesQuery = useInfiniteQuery({
     queryKey: ["source-titles", selectedSourceId, normalizedQuery],
@@ -498,7 +644,7 @@ function ExplorerPage() {
           <button
             className={source.metadata.sourceId === selectedSourceId ? "source-tab active" : "source-tab"}
             key={source.metadata.sourceId}
-            onClick={() => setSelectedSourceId(source.metadata.sourceId)}
+            onClick={() => selectSource(source.metadata.sourceId)}
           >
             {source.metadata.displayName}
           </button>
