@@ -78,6 +78,14 @@ function createAppApi(db, options = {}) {
       return translationWorkspaceRepository.updateChapterTextSize(chapterId, input);
     },
 
+    addPageEditMark(input) {
+      return translationWorkspaceRepository.addPageEditMark(input);
+    },
+
+    deletePageEditMark(markId) {
+      return translationWorkspaceRepository.deletePageEditMark(markId);
+    },
+
     listOcrProviders(languageHint) {
       return ocrService.listProviders(languageHint);
     },

@@ -427,6 +427,32 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 5,
+    name: "page_edit_marks",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS page_edit_marks (
+          id TEXT PRIMARY KEY,
+          chapter_id TEXT NOT NULL,
+          page_id TEXT NOT NULL,
+          kind TEXT NOT NULL DEFAULT 'brush'
+            CHECK (kind IN ('brush')),
+          color TEXT NOT NULL,
+          size REAL NOT NULL,
+          opacity REAL NOT NULL DEFAULT 1,
+          points_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+          FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_page_edit_marks_chapter_page
+          ON page_edit_marks(chapter_id, page_id, created_at);
+      `);
+    },
+  },
 ];
 
 function ensureMigrationTable(db) {

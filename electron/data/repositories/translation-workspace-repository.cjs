@@ -12,6 +12,9 @@ const MIN_TEXT_UNIT_FONT_SIZE = 8;
 const MAX_TEXT_UNIT_FONT_SIZE = 72;
 const MIN_TEXT_BOX_WIDTH = 16;
 const MIN_TEXT_BOX_HEIGHT = 12;
+const MIN_BRUSH_SIZE = 1;
+const MAX_BRUSH_SIZE = 96;
+const MIN_BRUSH_POINTS = 2;
 
 function normalizeFontSize(value) {
   if (value == null || value === "") return DEFAULT_TEXT_UNIT_FONT_SIZE;
@@ -24,6 +27,10 @@ function normalizeFontDelta(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   return Math.max(-24, Math.min(24, Math.round(numeric)));
+}
+
+function editMarkId() {
+  return `page_mark_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
 function roundBoxCoordinate(value) {
@@ -73,6 +80,60 @@ function normalizeTextBox(value, fallback, pageWidth, pageHeight) {
     y: roundBoxCoordinate(y),
     width: roundBoxCoordinate(width),
     height: roundBoxCoordinate(height),
+  };
+}
+
+function normalizeBrushSize(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 18;
+  return Math.max(MIN_BRUSH_SIZE, Math.min(MAX_BRUSH_SIZE, Math.round(numeric * 100) / 100));
+}
+
+function normalizeOpacity(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.max(0.05, Math.min(1, Math.round(numeric * 100) / 100));
+}
+
+function normalizeColor(value) {
+  const color = String(value ?? "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color.toUpperCase();
+  if (/^#[0-9a-f]{3}$/i.test(color)) {
+    const [, r, g, b] = color;
+    return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
+  return "#FFFFFF";
+}
+
+function normalizeEditPoints(points, pageWidth, pageHeight) {
+  const pageW = Number(pageWidth);
+  const pageH = Number(pageHeight);
+  const hasBounds = Number.isFinite(pageW) && Number.isFinite(pageH) && pageW > 0 && pageH > 0;
+  return (Array.isArray(points) ? points : [])
+    .map((point) => {
+      const x = Number(point?.x);
+      const y = Number(point?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return {
+        x: roundBoxCoordinate(hasBounds ? Math.max(0, Math.min(pageW, x)) : Math.max(0, x)),
+        y: roundBoxCoordinate(hasBounds ? Math.max(0, Math.min(pageH, y)) : Math.max(0, y)),
+      };
+    })
+    .filter(Boolean);
+}
+
+function mapPageEditMarkRow(row) {
+  return {
+    id: row.id,
+    chapterId: row.chapter_id,
+    pageId: row.page_id,
+    kind: row.kind ?? "brush",
+    color: normalizeColor(row.color),
+    size: normalizeBrushSize(row.size),
+    opacity: normalizeOpacity(row.opacity),
+    points: parseJson(row.points_json, []),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -199,12 +260,20 @@ class TranslationWorkspaceRepository {
       };
     });
 
+    const pageEditMarks = this.db.prepare(`
+      SELECT *
+      FROM page_edit_marks
+      WHERE chapter_id = ?
+      ORDER BY created_at ASC, id ASC
+    `).all(chapterId).map(mapPageEditMarkRow);
+
     const dictionary = this.dictionaryRepository.getProjectDictionary(chapter.projectId);
 
     return {
       project,
       chapter,
       pages,
+      pageEditMarks,
       textUnits: hydratedTextUnits,
       characters: dictionary.characters,
       glossaryTerms: dictionary.glossaryTerms,
@@ -442,6 +511,104 @@ class TranslationWorkspaceRepository {
       chapterId: existing.chapter_id,
       fontSize: typesetting.fontSize,
       id: textUnitId,
+    };
+  }
+
+  addPageEditMark(input) {
+    const page = this.db.prepare(`
+      SELECT p.id, p.chapter_id, p.width, p.height
+      FROM pages p
+      WHERE p.id = ?
+    `).get(String(input?.pageId ?? ""));
+
+    if (!page) {
+      throw new Error("Page not found");
+    }
+
+    const points = normalizeEditPoints(input?.points, page.width, page.height);
+    if (points.length < MIN_BRUSH_POINTS) {
+      throw new Error("Drawing stroke is too short");
+    }
+
+    const timestamp = new Date().toISOString();
+    const mark = {
+      id: editMarkId(),
+      chapterId: page.chapter_id,
+      pageId: page.id,
+      kind: "brush",
+      color: normalizeColor(input?.color),
+      size: normalizeBrushSize(input?.size),
+      opacity: normalizeOpacity(input?.opacity),
+      points,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare(`
+        INSERT INTO page_edit_marks (
+          id, chapter_id, page_id, kind, color, size, opacity, points_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        mark.id,
+        mark.chapterId,
+        mark.pageId,
+        mark.kind,
+        mark.color,
+        mark.size,
+        mark.opacity,
+        JSON.stringify(mark.points),
+        timestamp,
+        timestamp,
+      );
+
+      this.db.prepare("UPDATE chapters SET updated_at = ? WHERE id = ?").run(timestamp, mark.chapterId);
+      this.db.prepare(`
+        UPDATE projects
+        SET updated_at = ?
+        WHERE id = (SELECT project_id FROM chapters WHERE id = ?)
+      `).run(timestamp, mark.chapterId);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    return mark;
+  }
+
+  deletePageEditMark(markId) {
+    const existing = this.db.prepare(`
+      SELECT id, chapter_id, page_id
+      FROM page_edit_marks
+      WHERE id = ?
+    `).get(markId);
+
+    if (!existing) {
+      throw new Error("Page edit mark not found");
+    }
+
+    const timestamp = new Date().toISOString();
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare("DELETE FROM page_edit_marks WHERE id = ?").run(markId);
+      this.db.prepare("UPDATE chapters SET updated_at = ? WHERE id = ?").run(timestamp, existing.chapter_id);
+      this.db.prepare(`
+        UPDATE projects
+        SET updated_at = ?
+        WHERE id = (SELECT project_id FROM chapters WHERE id = ?)
+      `).run(timestamp, existing.chapter_id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    return {
+      chapterId: existing.chapter_id,
+      id: existing.id,
+      pageId: existing.page_id,
     };
   }
 

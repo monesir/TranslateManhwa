@@ -276,6 +276,32 @@ export interface RegionBox {
   height: number;
 }
 
+export interface PageEditPoint {
+  x: number;
+  y: number;
+}
+
+export interface PageEditMark {
+  id: string;
+  chapterId: string;
+  pageId: string;
+  kind: "brush";
+  color: string;
+  size: number;
+  opacity: number;
+  points: PageEditPoint[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PageEditMarkInput {
+  color: string;
+  opacity?: number;
+  pageId: string;
+  points: PageEditPoint[];
+  size: number;
+}
+
 export interface TextUnitTypesetting {
   box: RegionBox;
   fontSize: number;
@@ -304,6 +330,7 @@ export interface ChapterTranslationWorkspace {
   project: Project;
   chapter: Chapter;
   pages: Page[];
+  pageEditMarks: PageEditMark[];
   textUnits: TextUnit[];
   characters: Character[];
   glossaryTerms: GlossaryTerm[];
@@ -381,6 +408,8 @@ export type ActiveTool =
   | "pan"
   | "select"
   | "ocr"
+  | "draw"
+  | "color-picker"
   | "translate"
   | "review"
   | "typeset"

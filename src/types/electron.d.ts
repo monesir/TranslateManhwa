@@ -12,6 +12,8 @@ import type {
   OcrRegionRunOptions,
   OcrRunOptions,
   OcrRunResult,
+  PageEditMark,
+  PageEditMarkInput,
   Project,
   ProjectOverview,
   ChapterTextSizeInput,
@@ -61,6 +63,8 @@ interface FlorisApi {
     chapterId: string,
     input: ChapterTextSizeInput,
   ): Promise<{ chapterId: string; delta: number; updated: number }>;
+  addPageEditMark(input: PageEditMarkInput): Promise<PageEditMark>;
+  deletePageEditMark(markId: string): Promise<{ chapterId: string; id: string; pageId: string }>;
   addCharacter(projectId: string, input: CharacterInput): Promise<Character>;
   updateCharacter(
     characterId: string,

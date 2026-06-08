@@ -15,6 +15,8 @@ import type {
   OcrRunOptions,
   OcrRunResult,
   Page,
+  PageEditMark,
+  PageEditMarkInput,
   Project,
   ProjectOverview,
   RegionBox,
@@ -49,6 +51,7 @@ let mutableProjects: Project[] = [...projects];
 let mutableProjectOverviews: ProjectOverview[] = [...projectOverviews];
 let mutableChapters: Chapter[] = [...chapters];
 let mutablePages: Page[] = [...pages];
+let mutablePageEditMarks: PageEditMark[] = [];
 
 function slugify(value: string) {
   return value
@@ -87,6 +90,20 @@ function clampTextBox(box: RegionBox | undefined, fallback: RegionBox, page?: Pa
   const x = Math.max(0, Math.min(Number(source.x) || 0, pageWidth - width));
   const y = Math.max(0, Math.min(Number(source.y) || 0, pageHeight - height));
   return { type: "box", x, y, width, height };
+}
+
+function clampBrushSize(value: number) {
+  return Math.max(1, Math.min(96, Math.round((Number(value) || 18) * 100) / 100));
+}
+
+function normalizeHexColor(value: string) {
+  const color = String(value ?? "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color.toUpperCase();
+  if (/^#[0-9a-f]{3}$/i.test(color)) {
+    const [, r, g, b] = color;
+    return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
+  return "#FFFFFF";
 }
 
 export async function listProjects(): Promise<Project[]> {
@@ -319,6 +336,7 @@ export async function getChapterForTranslation(
     project,
     chapter,
     pages: mutablePages.filter((page) => page.chapterId === chapterId),
+    pageEditMarks: mutablePageEditMarks.filter((mark) => mark.chapterId === chapterId),
     textUnits: mutableTextUnits.filter((unit) => unit.chapterId === chapterId),
     characters: mutableCharacters.filter((character) => character.projectId === project.id),
     glossaryTerms: mutableGlossaryTerms.filter((term) => term.projectId === project.id),
@@ -647,6 +665,47 @@ export async function updateChapterTextSize(
   });
 
   return delay({ chapterId, delta, updated }, 80);
+}
+
+export async function addPageEditMark(input: PageEditMarkInput): Promise<PageEditMark> {
+  if (window.florisApi) return window.florisApi.addPageEditMark(input);
+
+  const page = mutablePages.find((item) => item.id === input.pageId);
+  if (!page) throw new Error("Page not found");
+  const timestamp = new Date().toISOString();
+  const points = (Array.isArray(input.points) ? input.points : [])
+    .map((point) => ({
+      x: Math.max(0, Math.min(page.width, Number(point.x) || 0)),
+      y: Math.max(0, Math.min(page.height, Number(point.y) || 0)),
+    }))
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  if (points.length < 2) throw new Error("Drawing stroke is too short");
+
+  const mark: PageEditMark = {
+    id: `page_mark_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    chapterId: page.chapterId,
+    pageId: page.id,
+    kind: "brush",
+    color: normalizeHexColor(input.color),
+    size: clampBrushSize(input.size),
+    opacity: Math.max(0.05, Math.min(1, Number(input.opacity ?? 1))),
+    points,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  mutablePageEditMarks = [...mutablePageEditMarks, mark];
+  return delay(mark, 80);
+}
+
+export async function deletePageEditMark(
+  markId: string,
+): Promise<{ chapterId: string; id: string; pageId: string }> {
+  if (window.florisApi) return window.florisApi.deletePageEditMark(markId);
+
+  const existing = mutablePageEditMarks.find((mark) => mark.id === markId);
+  if (!existing) throw new Error("Page edit mark not found");
+  mutablePageEditMarks = mutablePageEditMarks.filter((mark) => mark.id !== markId);
+  return delay({ chapterId: existing.chapterId, id: existing.id, pageId: existing.pageId }, 80);
 }
 
 export async function addCharacter(

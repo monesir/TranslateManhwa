@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld("florisApi", {
   deleteTextUnit: invoke("data:deleteTextUnit"),
   updateTextUnitTypesetting: invoke("data:updateTextUnitTypesetting"),
   updateChapterTextSize: invoke("data:updateChapterTextSize"),
+  addPageEditMark: invoke("data:addPageEditMark"),
+  deletePageEditMark: invoke("data:deletePageEditMark"),
   addCharacter: invoke("data:addCharacter"),
   updateCharacter: invoke("data:updateCharacter"),
   deleteCharacter: invoke("data:deleteCharacter"),

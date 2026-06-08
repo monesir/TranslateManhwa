@@ -22,6 +22,7 @@ import {
   Library as LibraryIcon,
   MousePointer2,
   PenTool,
+  Pipette,
   Plus,
   RefreshCw,
   Save,
@@ -31,6 +32,7 @@ import {
   Sparkles,
   Trash2,
   Type,
+  Undo2,
   Wand2,
   X,
   ZoomIn,
@@ -60,6 +62,7 @@ import {
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ReaderPage } from "./pages/ReaderPage";
 import {
+  addPageEditMark,
   addCharacter,
   addGlossaryTerm,
   browseSourceTitles,
@@ -67,6 +70,7 @@ import {
   createProject,
   deleteCharacter,
   deleteGlossaryTerm,
+  deletePageEditMark,
   deleteTextUnit,
   ensureSourceProject,
   getChapterForTranslation,
@@ -112,6 +116,9 @@ import type {
   OcrRunOptions,
   OcrSourceStatus,
   Page,
+  PageEditMark,
+  PageEditMarkInput,
+  PageEditPoint,
   Project,
   ProjectOverview,
   RegionBox,
@@ -211,6 +218,11 @@ interface TextBoxDraftState {
   textUnitId: string;
 }
 
+interface DrawStrokeState {
+  pageId: string;
+  points: PageEditPoint[];
+}
+
 function normalizeSelectionRegion(selection: OcrSelectionState | null): RegionBox | null {
   if (!selection) return null;
   const x = Math.min(selection.startX, selection.currentX);
@@ -275,6 +287,10 @@ const MAX_TEXT_UNIT_FONT_SIZE = 72;
 const TEXT_UNIT_FONT_STEP = 2;
 const MIN_TEXT_BOX_WIDTH = 16;
 const MIN_TEXT_BOX_HEIGHT = 12;
+const MIN_BRUSH_SIZE = 2;
+const MAX_BRUSH_SIZE = 96;
+const DEFAULT_BRUSH_SIZE = 34;
+const DEFAULT_BRUSH_COLOR = "#FFFFFF";
 
 function clampTextUnitFontSize(value: number) {
   if (!Number.isFinite(value)) return 18;
@@ -339,6 +355,57 @@ function transformTextBox(
     width: right - left,
     height: bottom - top,
   }, page);
+}
+
+function clampBrushSize(value: number) {
+  if (!Number.isFinite(value)) return DEFAULT_BRUSH_SIZE;
+  return Math.max(MIN_BRUSH_SIZE, Math.min(MAX_BRUSH_SIZE, Math.round(value)));
+}
+
+function pointsToSvgPath(points: PageEditPoint[]) {
+  if (points.length === 0) return "";
+  const [first, ...rest] = points;
+  return [
+    `M ${first.x} ${first.y}`,
+    ...rest.map((point) => `L ${point.x} ${point.y}`),
+  ].join(" ");
+}
+
+function rgbToHex(red: number, green: number, blue: number) {
+  return `#${[red, green, blue]
+    .map((value) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0"))
+    .join("")}`.toUpperCase();
+}
+
+function loadImageElement(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Image could not be loaded for color sampling"));
+    image.src = src;
+  });
+}
+
+async function sampleColorFromImageUrl(imageUrl: string, x: number, y: number, width: number, height: number) {
+  const response = await fetch(imageUrl);
+  if (!response.ok) throw new Error("Image could not be fetched for color sampling");
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const image = await loadImageElement(objectUrl);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width));
+    canvas.height = Math.max(1, Math.round(height));
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Canvas is unavailable for color sampling");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const pixelX = Math.max(0, Math.min(canvas.width - 1, Math.round(x)));
+    const pixelY = Math.max(0, Math.min(canvas.height - 1, Math.round(y)));
+    const [red, green, blue] = context.getImageData(pixelX, pixelY, 1, 1).data;
+    return rgbToHex(red, green, blue);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 function defaultCreateProjectForm(): CreateProjectFormState {
@@ -2284,8 +2351,12 @@ function TranslationPage() {
   const queryClient = useQueryClient();
   const pageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const editPageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const originalPaneScrollRef = useRef<HTMLDivElement | null>(null);
+  const editPaneScrollRef = useRef<HTMLDivElement | null>(null);
   const splitStageRef = useRef<HTMLDivElement | null>(null);
   const textBoxDragRef = useRef<TextBoxDragState | null>(null);
+  const drawStrokeRef = useRef<DrawStrokeState | null>(null);
+  const scrollSyncRef = useRef<"edit" | "original" | null>(null);
   const translationScreenRef = useRef<HTMLElement | null>(null);
   const ocrSelectionRef = useRef<OcrSelectionState | null>(null);
   const [viewerMode, setViewerMode] = useState<"page" | "webtoon">("page");
@@ -2296,6 +2367,10 @@ function TranslationPage() {
   const [replaceOcrText, setReplaceOcrText] = useState(true);
   const [ocrSelection, setOcrSelection] = useState<OcrSelectionState | null>(null);
   const [textBoxDraft, setTextBoxDraft] = useState<TextBoxDraftState | null>(null);
+  const [drawStroke, setDrawStroke] = useState<DrawStrokeState | null>(null);
+  const [brushColor, setBrushColor] = useState(DEFAULT_BRUSH_COLOR);
+  const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE);
+  const [colorPickStatus, setColorPickStatus] = useState("");
   const {
     selectedPageId,
     selectedTextUnitId,
@@ -2388,6 +2463,40 @@ function TranslationPage() {
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
     },
   });
+  const addPageEditMarkMutation = useMutation({
+    mutationFn: (input: PageEditMarkInput) => addPageEditMark(input),
+    onSuccess: (mark) => {
+      queryClient.setQueryData<ChapterTranslationWorkspace | undefined>(
+        ["translation-workspace", mark.chapterId],
+        (current) => current
+          ? {
+            ...current,
+            pageEditMarks: [...(current.pageEditMarks ?? []), mark],
+          }
+          : current,
+      );
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", mark.chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+  });
+  const deletePageEditMarkMutation = useMutation({
+    mutationFn: (markId: string) => deletePageEditMark(markId),
+    onSuccess: (result) => {
+      queryClient.setQueryData<ChapterTranslationWorkspace | undefined>(
+        ["translation-workspace", result.chapterId],
+        (current) => current
+          ? {
+            ...current,
+            pageEditMarks: (current.pageEditMarks ?? []).filter((mark) => mark.id !== result.id),
+          }
+          : current,
+      );
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+  });
   const runPageOcrMutation = useMutation({
     mutationFn: ({ pageId, input }: { pageId: string; input: OcrRunOptions }) =>
       runOcrForPage(pageId, input),
@@ -2423,6 +2532,15 @@ function TranslationPage() {
       const group = groups.get(unit.pageId) ?? [];
       group.push(unit);
       groups.set(unit.pageId, group);
+    }
+    return groups;
+  }, [workspace]);
+  const editMarksByPage = useMemo(() => {
+    const groups = new Map<string, PageEditMark[]>();
+    for (const mark of workspace?.pageEditMarks ?? []) {
+      const group = groups.get(mark.pageId) ?? [];
+      group.push(mark);
+      groups.set(mark.pageId, group);
     }
     return groups;
   }, [workspace]);
@@ -2467,6 +2585,8 @@ function TranslationPage() {
 
   const currentPage = workspace.pages.find((page) => page.id === selectedPageId) ?? workspace.pages[0];
   const pageTextUnits = textUnitsByPage.get(currentPage.id) ?? [];
+  const currentPageEditMarks = editMarksByPage.get(currentPage.id) ?? [];
+  const lastCurrentPageEditMark = currentPageEditMarks[currentPageEditMarks.length - 1];
   const selectedTextUnit =
     workspace.textUnits.find((unit) => unit.id === selectedTextUnitId) ?? workspace.textUnits[0];
   const selectedFontSize = clampTextUnitFontSize(selectedTextUnit?.typesetting.fontSize ?? 18);
@@ -2492,6 +2612,20 @@ function TranslationPage() {
   const selectTextUnit = (unit: TextUnit) => {
     setSelectedTextUnitId(unit.id);
     selectPage(unit.pageId);
+  };
+  const syncPaneScroll = (sourceName: "edit" | "original") => {
+    const source = sourceName === "original" ? originalPaneScrollRef.current : editPaneScrollRef.current;
+    const target = sourceName === "original" ? editPaneScrollRef.current : originalPaneScrollRef.current;
+    if (!source || !target || scrollSyncRef.current) return;
+
+    scrollSyncRef.current = sourceName;
+    const sourceMaxLeft = Math.max(1, source.scrollWidth - source.clientWidth);
+    const targetMaxLeft = Math.max(0, target.scrollWidth - target.clientWidth);
+    target.scrollTop = source.scrollTop;
+    target.scrollLeft = (source.scrollLeft / sourceMaxLeft) * targetMaxLeft;
+    window.requestAnimationFrame(() => {
+      scrollSyncRef.current = null;
+    });
   };
   const setSelectedTextFontSize = (fontSize: number) => {
     if (!selectedTextUnit || updateTextUnitTypesettingMutation.isPending) return;
@@ -2592,6 +2726,97 @@ function TranslationPage() {
     document.addEventListener("pointermove", handleMove);
     document.addEventListener("pointerup", handleUp, { once: true });
   };
+  const pointFromSvg = (event: PointerEvent<SVGSVGElement>, page: Page) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - bounds.left) / bounds.width) * page.width;
+    const y = ((event.clientY - bounds.top) / bounds.height) * page.height;
+    return {
+      x: Math.max(0, Math.min(page.width, x)),
+      y: Math.max(0, Math.min(page.height, y)),
+    };
+  };
+  const pickColorFromPage = async (event: PointerEvent<SVGSVGElement>, page: Page) => {
+    if (activeTool !== "color-picker") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = pointFromSvg(event, page);
+    if (!page.imageUrl || !isRenderableImageUrl(page.imageUrl)) {
+      setColorPickStatus("No image color");
+      return;
+    }
+
+    try {
+      const color = await sampleColorFromImageUrl(page.imageUrl, point.x, point.y, page.width, page.height);
+      setBrushColor(color);
+      setColorPickStatus(color);
+      setActiveTool("draw");
+    } catch (error) {
+      setColorPickStatus(error instanceof Error ? error.message : "Color pick failed");
+    }
+  };
+  const appendDrawPoint = (point: PageEditPoint) => {
+    const current = drawStrokeRef.current;
+    if (!current) return;
+    const previous = current.points[current.points.length - 1];
+    if (previous) {
+      const distance = Math.hypot(point.x - previous.x, point.y - previous.y);
+      if (distance < 1.4) return;
+    }
+    const nextStroke = {
+      ...current,
+      points: [...current.points, point],
+    };
+    drawStrokeRef.current = nextStroke;
+    setDrawStroke(nextStroke);
+  };
+  const beginDrawing = (event: PointerEvent<SVGSVGElement>, page: Page) => {
+    if (activeTool === "color-picker") {
+      void pickColorFromPage(event, page);
+      return;
+    }
+    if (activeTool !== "draw" || event.button !== 0 || addPageEditMarkMutation.isPending) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedPageId(page.id);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const point = pointFromSvg(event, page);
+    const stroke = {
+      pageId: page.id,
+      points: [point],
+    };
+    drawStrokeRef.current = stroke;
+    setDrawStroke(stroke);
+  };
+  const moveDrawing = (event: PointerEvent<SVGSVGElement>, page: Page) => {
+    const current = drawStrokeRef.current;
+    if (activeTool !== "draw" || !current || current.pageId !== page.id) return;
+    event.preventDefault();
+    appendDrawPoint(pointFromSvg(event, page));
+  };
+  const endDrawing = (event: PointerEvent<SVGSVGElement>, page: Page) => {
+    const current = drawStrokeRef.current;
+    if (activeTool !== "draw" || !current || current.pageId !== page.id) return;
+    event.preventDefault();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    appendDrawPoint(pointFromSvg(event, page));
+    const finalStroke = drawStrokeRef.current;
+    drawStrokeRef.current = null;
+    setDrawStroke(null);
+    if (!finalStroke || finalStroke.points.length < 2) return;
+    addPageEditMarkMutation.mutate({
+      color: brushColor,
+      opacity: 1,
+      pageId: finalStroke.pageId,
+      points: finalStroke.points,
+      size: brushSize,
+    });
+  };
+  const undoCurrentPageStroke = () => {
+    if (!lastCurrentPageEditMark || deletePageEditMarkMutation.isPending) return;
+    deletePageEditMarkMutation.mutate(lastCurrentPageEditMark.id);
+  };
   const ocrInput: OcrRunOptions = {
     languageHint: ocrLanguageHint || undefined,
     providerId: ocrProviderId,
@@ -2637,15 +2862,6 @@ function TranslationPage() {
     window.requestAnimationFrame(() => {
       translationScreenRef.current?.focus({ preventScroll: true });
     });
-  };
-  const pointFromSvg = (event: PointerEvent<SVGSVGElement>, page: Page) => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const x = ((event.clientX - bounds.left) / bounds.width) * page.width;
-    const y = ((event.clientY - bounds.top) / bounds.height) * page.height;
-    return {
-      x: Math.max(0, Math.min(page.width, x)),
-      y: Math.max(0, Math.min(page.height, y)),
-    };
   };
   const beginOcrSelection = (event: PointerEvent<SVGSVGElement>, page: Page) => {
     if (activeTool !== "ocr" || isOcrRunning || event.button !== 0) return;
@@ -2750,6 +2966,49 @@ function TranslationPage() {
         <div className="mock-panel panel-c" />
       </>
     );
+  const renderEditMarkPath = (mark: PageEditMark, className = "edit-mark-path") => (
+    <path
+      className={className}
+      d={pointsToSvgPath(mark.points)}
+      fill="none"
+      key={mark.id}
+      opacity={mark.opacity}
+      stroke={mark.color}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={mark.size}
+    />
+  );
+  const renderDrawingLayer = (page: Page, marks: PageEditMark[]) => (
+    <svg
+      className={
+        activeTool === "draw"
+          ? "edit-drawing-layer is-drawing"
+          : activeTool === "color-picker"
+            ? "edit-drawing-layer is-color-picking"
+            : "edit-drawing-layer"
+      }
+      viewBox={`0 0 ${page.width} ${page.height}`}
+      onPointerCancel={(event) => endDrawing(event, page)}
+      onPointerDown={(event) => beginDrawing(event, page)}
+      onPointerMove={(event) => moveDrawing(event, page)}
+      onPointerUp={(event) => endDrawing(event, page)}
+    >
+      {marks.map((mark) => renderEditMarkPath(mark))}
+      {drawStroke?.pageId === page.id && drawStroke.points.length > 0 ? (
+        <path
+          className="edit-mark-path preview"
+          d={pointsToSvgPath(drawStroke.points)}
+          fill="none"
+          opacity={1}
+          stroke={brushColor}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={brushSize}
+        />
+      ) : null}
+    </svg>
+  );
   const renderOriginalPageSurface = (page: Page, units: TextUnit[], surfaceClassName = "") => (
     <div
       className={`mock-page original-page-surface page-tone-${page.imageTone} ${surfaceClassName}`.trim()}
@@ -2757,10 +3016,19 @@ function TranslationPage() {
     >
       {renderPageArtwork(page)}
       <svg
-        className={activeTool === "ocr" ? "region-layer is-selecting" : "region-layer"}
+        className={
+          activeTool === "ocr"
+            ? "region-layer is-selecting"
+            : activeTool === "color-picker"
+              ? "region-layer is-color-picking"
+              : "region-layer"
+        }
         tabIndex={0}
         viewBox={`0 0 ${page.width} ${page.height}`}
-        onPointerDown={(event) => beginOcrSelection(event, page)}
+        onPointerDown={(event) => {
+          if (activeTool === "color-picker") void pickColorFromPage(event, page);
+          else beginOcrSelection(event, page);
+        }}
         onPointerMove={(event) => moveOcrSelection(event, page)}
         onPointerUp={(event) => endOcrSelection(event, page)}
         onPointerCancel={(event) => endOcrSelection(event, page, false)}
@@ -2775,7 +3043,7 @@ function TranslationPage() {
             rx={12}
             className={unit.id === selectedTextUnit?.id ? "region selected" : "region"}
             onClick={() => {
-              if (activeTool !== "ocr") selectTextUnit(unit);
+              if (activeTool !== "ocr" && activeTool !== "color-picker") selectTextUnit(unit);
             }}
           />
         ))}
@@ -2792,13 +3060,14 @@ function TranslationPage() {
       </svg>
     </div>
   );
-  const renderEditPageSurface = (page: Page, units: TextUnit[], surfaceClassName = "") => (
+  const renderEditPageSurface = (page: Page, units: TextUnit[], marks: PageEditMark[], surfaceClassName = "") => (
     <div
       className={`mock-page edit-page-surface page-tone-${page.imageTone} ${surfaceClassName}`.trim()}
       style={pageSurfaceStyle(page)}
     >
       {renderPageArtwork(page)}
-      <div className="edit-work-layer">
+      {renderDrawingLayer(page, marks)}
+      <div className={activeTool === "draw" || activeTool === "color-picker" ? "edit-work-layer is-passive" : "edit-work-layer"}>
         {units.map((unit) => {
           const label = unit.finalTranslation || unit.microsoftTranslation || unit.aiTranslation || unit.sourceText;
           const isSelected = unit.id === selectedTextUnit?.id;
@@ -3015,7 +3284,11 @@ function TranslationPage() {
                 <strong>Original</strong>
                 <span>OCR source</span>
               </div>
-              <div className={viewerMode === "webtoon" ? "pane-page-scroll webtoon-stage" : "pane-page-scroll"}>
+              <div
+                className={viewerMode === "webtoon" ? "pane-page-scroll webtoon-stage" : "pane-page-scroll"}
+                onScroll={() => syncPaneScroll("original")}
+                ref={originalPaneScrollRef}
+              >
                 {viewerMode === "page" ? (
                   renderOriginalPageSurface(currentPage, pageTextUnits)
                 ) : (
@@ -3062,13 +3335,18 @@ function TranslationPage() {
                 <strong>Edit</strong>
                 <span>Working copy</span>
               </div>
-              <div className={viewerMode === "webtoon" ? "pane-page-scroll webtoon-stage" : "pane-page-scroll"}>
+              <div
+                className={viewerMode === "webtoon" ? "pane-page-scroll webtoon-stage" : "pane-page-scroll"}
+                onScroll={() => syncPaneScroll("edit")}
+                ref={editPaneScrollRef}
+              >
                 {viewerMode === "page" ? (
-                  renderEditPageSurface(currentPage, pageTextUnits)
+                  renderEditPageSurface(currentPage, pageTextUnits, currentPageEditMarks)
                 ) : (
                   <div className={mergePages ? "webtoon-page-stack merged" : "webtoon-page-stack"}>
                     {workspace.pages.map((page) => {
                       const units = textUnitsByPage.get(page.id) ?? [];
+                      const marks = editMarksByPage.get(page.id) ?? [];
                       return (
                         <div
                           className={page.id === currentPage.id ? "webtoon-page-anchor active" : "webtoon-page-anchor"}
@@ -3078,7 +3356,7 @@ function TranslationPage() {
                             editPageRefs.current[page.id] = element;
                           }}
                         >
-                          {renderEditPageSurface(page, units, "webtoon-page-surface")}
+                          {renderEditPageSurface(page, units, marks, "webtoon-page-surface")}
                         </div>
                       );
                     })}
@@ -3112,8 +3390,17 @@ function TranslationPage() {
             title="Translation"
             tools={[
               ["translate", Bot],
-              ["typeset", Type],
               ["export", Download],
+            ]}
+            activeTool={activeTool}
+            setActiveTool={setActiveTool}
+          />
+          <ToolGroup
+            title="Editing"
+            tools={[
+              ["draw", PenTool],
+              ["color-picker", Pipette],
+              ["typeset", Type],
             ]}
             activeTool={activeTool}
             setActiveTool={setActiveTool}
@@ -3122,6 +3409,58 @@ function TranslationPage() {
             <h3>Selected Text</h3>
             <p>{selectedTextUnit?.sourceText}</p>
             <small>{selectedTextUnit?.reviewStatus}</small>
+          </div>
+          <div className="tool-panel draw-panel">
+            <h3>Brush</h3>
+            <div className="brush-color-row">
+              <input
+                aria-label="Brush color"
+                className="brush-color-input"
+                onChange={(event) => {
+                  setBrushColor(event.target.value.toUpperCase());
+                  setColorPickStatus(event.target.value.toUpperCase());
+                }}
+                type="color"
+                value={brushColor}
+              />
+              <button
+                className={activeTool === "color-picker" ? "button secondary active-command" : "button secondary"}
+                onClick={() => setActiveTool("color-picker")}
+                type="button"
+              >
+                <Pipette size={15} />
+                Pick
+              </button>
+            </div>
+            <div className="brush-size-row">
+              <span>Size</span>
+              <input
+                className="brush-size-range"
+                max={MAX_BRUSH_SIZE}
+                min={MIN_BRUSH_SIZE}
+                onChange={(event) => setBrushSize(clampBrushSize(Number(event.target.value)))}
+                type="range"
+                value={brushSize}
+              />
+              <input
+                className="brush-size-input"
+                max={MAX_BRUSH_SIZE}
+                min={MIN_BRUSH_SIZE}
+                onChange={(event) => setBrushSize(clampBrushSize(Number(event.target.value)))}
+                type="number"
+                value={brushSize}
+              />
+            </div>
+            <button
+              className="button secondary full-width"
+              disabled={!lastCurrentPageEditMark || deletePageEditMarkMutation.isPending}
+              onClick={undoCurrentPageStroke}
+              type="button"
+            >
+              <Undo2 size={15} />
+              Undo stroke
+            </button>
+            {colorPickStatus ? <small className="brush-status">{colorPickStatus}</small> : null}
           </div>
           <div className="tool-panel text-size-panel">
             <h3>Text Size</h3>
