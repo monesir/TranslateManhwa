@@ -9,6 +9,7 @@ const PYTHON_CROP_SCRIPT = path.join(__dirname, "scripts", "crop-image.py");
 const WINDOWS_OCR_SCRIPT = path.join(__dirname, "scripts", "windows-ocr.ps1");
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_TESSDATA_LANGUAGES = ["ara", "chi_sim", "chi_tra", "eng", "jpn", "kor", "osd"];
+const WINDOWS_OCR_FALLBACK_PROVIDERS = ["paddleocr", "doctr", "easyocr", "rapidocr"];
 const REGION_CROP_MIN_WIDTH = 360;
 const REGION_CROP_MIN_HEIGHT = 120;
 const REGION_CROP_MAX_SCALE = 4;
@@ -443,6 +444,78 @@ function normalizeItems(rawItems, page) {
   return mergeOcrLines(items, page);
 }
 
+function combinedOcrText(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => String(item.text ?? ""))
+    .join("\n")
+    .trim();
+}
+
+function isEnglishLanguageHint(languageHint) {
+  const key = String(languageHint ?? "").trim().toLowerCase();
+  return key === "english" || key === "en" || key === "en-us";
+}
+
+function windowsOcrSuspicionScore(items) {
+  const text = combinedOcrText(items);
+  if (!text) return 30;
+
+  const words = text.match(/[^\s]+/g) ?? [];
+  let score = 0;
+  const replacementMatches = text.match(/[�æÆ]/g) ?? [];
+  const symbolMatches = text.match(/[$]/g) ?? [];
+  const slashMatches = text.match(/\//g) ?? [];
+  score += replacementMatches.length * 12;
+  score += symbolMatches.length * 8;
+  score += slashMatches.length * 3;
+
+  for (const word of words) {
+    const hasLetter = /[A-Za-z]/.test(word);
+    if (!hasLetter) continue;
+    if (/[�æÆ$]/.test(word)) score += 10;
+    if (/[A-Za-z]\d|\d[A-Za-z]/.test(word)) score += 7;
+    if (/[A-Za-z]\/|\/[A-Za-z]/.test(word)) score += 6;
+    if (/[A-Z]{2,}5[A-Z5]{1,}/.test(word)) score += 8;
+  }
+
+  return score;
+}
+
+function ocrQualityScore(items) {
+  const text = combinedOcrText(items);
+  const letters = (text.match(/[A-Za-z]/g) ?? []).length;
+  const spaces = (text.match(/\s/g) ?? []).length;
+  const confidenceValues = (Array.isArray(items) ? items : [])
+    .map((item) => item.confidence)
+    .filter((value) => typeof value === "number" && Number.isFinite(value));
+  const confidenceBonus = confidenceValues.length > 0
+    ? (confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length) * 20
+    : 0;
+
+  return letters + spaces * 0.2 + confidenceBonus - windowsOcrSuspicionScore(items) * 2;
+}
+
+function shouldRetryWindowsOcr(items, languageHint) {
+  if (process.env.FLORIS_WINDOWS_OCR_FALLBACK === "0") return false;
+  if (!isEnglishLanguageHint(languageHint)) return false;
+  const text = combinedOcrText(items);
+  if (!text) return true;
+  const words = text.match(/[^\s]+/g) ?? [];
+  const suspicion = windowsOcrSuspicionScore(items);
+  return suspicion >= 14 || (words.length > 0 && suspicion / words.length >= 2.2);
+}
+
+function shouldUseOcrFallback(primaryItems, fallbackItems) {
+  if (!Array.isArray(fallbackItems) || fallbackItems.length === 0) return false;
+  if (!Array.isArray(primaryItems) || primaryItems.length === 0) return true;
+
+  const primarySuspicion = windowsOcrSuspicionScore(primaryItems);
+  const fallbackSuspicion = windowsOcrSuspicionScore(fallbackItems);
+  if (fallbackSuspicion + 8 < primarySuspicion) return true;
+
+  return ocrQualityScore(fallbackItems) > ocrQualityScore(primaryItems) + 10;
+}
+
 function parseJsonOutput(result, providerId) {
   const output = result.stdout.trim();
   if (!result.ok) {
@@ -647,6 +720,36 @@ class OcrProviderRegistry {
     return { ...provider, available: false, reason: provider.setup };
   }
 
+  async isPythonProviderAvailable(providerId) {
+    if (providerId === "paddleocr") return checkPythonImport("paddleocr");
+    if (providerId === "doctr") return checkPythonImport("doctr");
+    if (providerId === "easyocr") return checkPythonImport("easyocr");
+    if (providerId === "rapidocr") return checkPythonImportAny(["rapidocr", "rapidocr_onnxruntime"]);
+    if (providerId === "manga-ocr") return checkPythonImport("manga_ocr");
+    return false;
+  }
+
+  async runWindowsFallbackProvider(page, options, primaryResult) {
+    for (const providerId of WINDOWS_OCR_FALLBACK_PROVIDERS) {
+      try {
+        if (!(await this.isPythonProviderAvailable(providerId))) continue;
+        const fallbackResult = await this.runPythonProvider(providerId, page, options);
+        if (shouldUseOcrFallback(primaryResult.items, fallbackResult.items)) {
+          return {
+            ...fallbackResult,
+            fallbackFromProviderId: "windows",
+            languageDetected: primaryResult.languageDetected ?? fallbackResult.languageDetected,
+            providerId,
+          };
+        }
+      } catch {
+        // Try the next local provider. The original Windows result remains the fallback.
+      }
+    }
+
+    return null;
+  }
+
   async recognizePage(providerId, page, options = {}) {
     const provider = this.getProvider(providerId);
     if (!provider) throw new Error(`Unknown OCR provider: ${providerId}`);
@@ -670,8 +773,10 @@ class OcrProviderRegistry {
       const result = await this.recognizePage(providerId, cropped.page, options);
       return {
         cropRect: cropped.cropRect,
+        fallbackFromProviderId: result.fallbackFromProviderId,
         languageDetected: result.languageDetected,
         items: offsetItemsToOriginalPage(result.items, cropped.cropRect, page, cropped.scale),
+        providerId: result.providerId,
       };
     } finally {
       await cropped.cleanup();
@@ -692,10 +797,18 @@ class OcrProviderRegistry {
     if (tag) args.push("-LanguageTag", tag);
     const result = await runProcess("powershell.exe", args, { timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS });
     const payload = parseJsonOutput(result, "windows");
-    return {
+    const primaryResult = {
       languageDetected: payload.languageDetected ?? tag ?? null,
       items: normalizeItems(payload.items, page),
+      providerId: "windows",
     };
+
+    if (shouldRetryWindowsOcr(primaryResult.items, options.languageHint)) {
+      const fallbackResult = await this.runWindowsFallbackProvider(page, options, primaryResult);
+      if (fallbackResult) return fallbackResult;
+    }
+
+    return primaryResult;
   }
 
   async runPythonProvider(providerId, page, options) {
@@ -720,6 +833,7 @@ class OcrProviderRegistry {
     return {
       languageDetected: options.languageHint ?? null,
       items: normalizeItems(payload.items, page),
+      providerId,
     };
   }
 
@@ -750,6 +864,7 @@ class OcrProviderRegistry {
     return {
       languageDetected: language,
       items: normalizeItems(parseTesseractTsv(result.stdout, page), page),
+      providerId: "tesseract",
     };
   }
 }

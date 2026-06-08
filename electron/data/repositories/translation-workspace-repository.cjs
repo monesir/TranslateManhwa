@@ -146,7 +146,7 @@ class TranslationWorkspaceRepository {
           LIMIT 1
         ) AS ocr_confidence,
         (
-          SELECT ocr.provider
+          SELECT COALESCE(json_extract(oc.region_json, '$.provider'), ocr.provider)
           FROM ocr_candidates oc
           JOIN ocr_runs ocr ON ocr.id = oc.ocr_run_id
           WHERE oc.text_unit_id = tu.id
@@ -270,7 +270,7 @@ class TranslationWorkspaceRepository {
           LIMIT 1
         ) AS ocr_confidence,
         (
-          SELECT ocr.provider
+          SELECT COALESCE(json_extract(oc.region_json, '$.provider'), ocr.provider)
           FROM ocr_candidates oc
           JOIN ocr_runs ocr ON ocr.id = oc.ocr_run_id
           WHERE oc.text_unit_id = tu.id

@@ -11,6 +11,8 @@ Add-Type -AssemblyName System.Runtime.WindowsRuntime
 [Windows.Storage.FileAccessMode, Windows.Storage, ContentType = WindowsRuntime] | Out-Null
 [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType = WindowsRuntime] | Out-Null
 [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics.Imaging, ContentType = WindowsRuntime] | Out-Null
+[Windows.Graphics.Imaging.BitmapPixelFormat, Windows.Graphics.Imaging, ContentType = WindowsRuntime] | Out-Null
+[Windows.Graphics.Imaging.BitmapAlphaMode, Windows.Graphics.Imaging, ContentType = WindowsRuntime] | Out-Null
 [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
 [Windows.Globalization.Language, Windows.Globalization, ContentType = WindowsRuntime] | Out-Null
 
@@ -31,10 +33,7 @@ function AwaitOperation($Operation, [Type]$ResultType) {
 function GetEngine([string]$Tag) {
   if ($Tag) {
     $language = [Windows.Globalization.Language]::new($Tag)
-    $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($language)
-    if ($engine -ne $null) {
-      return $engine
-    }
+    return [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($language)
   }
   return [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
 }
@@ -63,7 +62,12 @@ $file = AwaitOperation ([Windows.Storage.StorageFile]::GetFileFromPathAsync($res
 $stream = AwaitOperation ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
 $decoder = AwaitOperation ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
 $bitmap = AwaitOperation ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
-$result = AwaitOperation ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+$ocrBitmap = [Windows.Graphics.Imaging.SoftwareBitmap]::Convert(
+  $bitmap,
+  [Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8,
+  [Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied
+)
+$result = AwaitOperation ($engine.RecognizeAsync($ocrBitmap)) ([Windows.Media.Ocr.OcrResult])
 
 $items = @()
 $order = 1

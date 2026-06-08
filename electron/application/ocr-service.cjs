@@ -137,7 +137,7 @@ class OcrService {
       return this.repository.applyRecognition({
         languageDetected: result.languageDetected,
         pageResults: [{ items: result.items, page }],
-        provider: options.providerId,
+        provider: result.providerId ?? options.providerId,
         replaceExisting: options.replaceExisting,
         run,
       });
@@ -179,6 +179,7 @@ class OcrService {
             languageHint: options.languageHint,
           });
           result.languageDetected = retryResult.languageDetected ?? result.languageDetected;
+          result.providerId = retryResult.providerId ?? result.providerId;
           recognizedItems = focusRegionItems(retryResult.items, selectedRegion, page);
         }
       }
@@ -190,7 +191,7 @@ class OcrService {
       return this.repository.applyRecognition({
         languageDetected: result.languageDetected,
         pageResults: [{ items: recognizedItems, page, replaceRegion: selectedRegion }],
-        provider: options.providerId,
+        provider: result.providerId ?? options.providerId,
         replaceExisting: options.replaceExisting,
         run,
       });
@@ -223,13 +224,13 @@ class OcrService {
           languageHint: options.languageHint,
         });
         if (!languageDetected && result.languageDetected) languageDetected = result.languageDetected;
-        pageResults.push({ items: result.items, page });
+        pageResults.push({ items: result.items, page, provider: result.providerId ?? options.providerId });
       }
 
       return this.repository.applyRecognition({
         languageDetected,
         pageResults,
-        provider: options.providerId,
+        provider: pageResults.find((pageResult) => pageResult.provider !== options.providerId)?.provider ?? options.providerId,
         replaceExisting: options.replaceExisting,
         run,
       });
