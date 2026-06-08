@@ -29,6 +29,9 @@ function normalizeExpansion(expansion) {
   };
 }
 
+const REGION_RETRY_EXPANSION = { bottom: 64, left: 96, right: 144, top: 64 };
+const REGION_FOCUS_EXPANSION = { bottom: 18, left: 18, right: 18, top: 18 };
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -70,6 +73,40 @@ function expandRegion(region, expansion, page) {
     width: right - x,
     height: bottom - y,
   };
+}
+
+function regionRight(region) {
+  return Number(region?.x ?? 0) + Number(region?.width ?? 0);
+}
+
+function regionBottom(region) {
+  return Number(region?.y ?? 0) + Number(region?.height ?? 0);
+}
+
+function regionsIntersect(first, second) {
+  return !(
+    regionRight(first) < Number(second?.x ?? 0) ||
+    regionRight(second) < Number(first?.x ?? 0) ||
+    regionBottom(first) < Number(second?.y ?? 0) ||
+    regionBottom(second) < Number(first?.y ?? 0)
+  );
+}
+
+function regionsEqual(first, second) {
+  return (
+    Math.round(first.x) === Math.round(second.x) &&
+    Math.round(first.y) === Math.round(second.y) &&
+    Math.round(first.width) === Math.round(second.width) &&
+    Math.round(first.height) === Math.round(second.height)
+  );
+}
+
+function focusRegionItems(items, selectedRegion, page) {
+  const allItems = Array.isArray(items) ? items : [];
+  if (allItems.length === 0) return [];
+  const focusRegion = expandRegion(selectedRegion, REGION_FOCUS_EXPANSION, page);
+  const focusedItems = allItems.filter((item) => regionsIntersect(item.region, focusRegion));
+  return focusedItems.length > 0 ? focusedItems : allItems;
 }
 
 class OcrService {
@@ -133,9 +170,26 @@ class OcrService {
       const result = await this.registry.recognizeRegion(options.providerId, page, expandedRegion, {
         languageHint: options.languageHint,
       });
+      let recognizedItems = focusRegionItems(result.items, selectedRegion, page);
+
+      if (recognizedItems.length === 0) {
+        const retryRegion = expandRegion(selectedRegion, REGION_RETRY_EXPANSION, page);
+        if (!regionsEqual(retryRegion, expandedRegion)) {
+          const retryResult = await this.registry.recognizeRegion(options.providerId, page, retryRegion, {
+            languageHint: options.languageHint,
+          });
+          result.languageDetected = retryResult.languageDetected ?? result.languageDetected;
+          recognizedItems = focusRegionItems(retryResult.items, selectedRegion, page);
+        }
+      }
+
+      if (recognizedItems.length === 0) {
+        throw new Error("No text was recognized in the selected area. Select a larger part of the bubble.");
+      }
+
       return this.repository.applyRecognition({
         languageDetected: result.languageDetected,
-        pageResults: [{ items: result.items, page, replaceRegion: selectedRegion }],
+        pageResults: [{ items: recognizedItems, page, replaceRegion: selectedRegion }],
         provider: options.providerId,
         replaceExisting: options.replaceExisting,
         run,

@@ -205,10 +205,10 @@ function normalizeSelectionRegion(selection: OcrSelectionState | null): RegionBo
 }
 
 const DEFAULT_OCR_REGION_EXPANSION: OcrRegionExpansion = {
-  bottom: 12,
-  left: 12,
-  right: 40,
-  top: 12,
+  bottom: 30,
+  left: 48,
+  right: 96,
+  top: 30,
 };
 
 function defaultCreateProjectForm(): CreateProjectFormState {

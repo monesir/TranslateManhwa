@@ -9,6 +9,9 @@ const PYTHON_CROP_SCRIPT = path.join(__dirname, "scripts", "crop-image.py");
 const WINDOWS_OCR_SCRIPT = path.join(__dirname, "scripts", "windows-ocr.ps1");
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_TESSDATA_LANGUAGES = ["ara", "chi_sim", "chi_tra", "eng", "jpn", "kor", "osd"];
+const REGION_CROP_MIN_WIDTH = 360;
+const REGION_CROP_MIN_HEIGHT = 120;
+const REGION_CROP_MAX_SCALE = 4;
 
 const OCR_PROVIDERS = [
   {
@@ -178,6 +181,19 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function scaledDimension(value, scale) {
+  return Math.max(1, Math.round(Number(value) * scale));
+}
+
+function regionCropScale(cropRect) {
+  const width = Math.max(1, Number(cropRect?.width ?? 1));
+  const height = Math.max(1, Number(cropRect?.height ?? 1));
+  const widthScale = REGION_CROP_MIN_WIDTH / width;
+  const heightScale = REGION_CROP_MIN_HEIGHT / height;
+  const scale = Math.max(1, widthScale, heightScale);
+  return Math.min(REGION_CROP_MAX_SCALE, Math.round(scale * 100) / 100);
+}
+
 function normalizeCropRect(region, page) {
   const x = clamp(Math.floor(Number(region?.x ?? 0)), 0, Math.max(0, page.width - 1));
   const y = clamp(Math.floor(Number(region?.y ?? 0)), 0, Math.max(0, page.height - 1));
@@ -200,7 +216,7 @@ function normalizeCropRect(region, page) {
   };
 }
 
-async function cropWithNativeImage(sourcePath, outputPath, cropRect) {
+async function cropWithNativeImage(sourcePath, outputPath, cropRect, scale) {
   let nativeImage;
   try {
     nativeImage = require("electron").nativeImage;
@@ -211,15 +227,24 @@ async function cropWithNativeImage(sourcePath, outputPath, cropRect) {
 
   const source = nativeImage.createFromPath(sourcePath);
   if (source.isEmpty()) return false;
-  const cropped = source.crop(cropRect);
+  let cropped = source.crop(cropRect);
   if (cropped.isEmpty()) return false;
+
+  if (scale > 1) {
+    const resized = cropped.resize({
+      height: scaledDimension(cropRect.height, scale),
+      quality: "best",
+      width: scaledDimension(cropRect.width, scale),
+    });
+    if (!resized.isEmpty()) cropped = resized;
+  }
 
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await fs.writeFile(outputPath, cropped.toPNG());
   return true;
 }
 
-async function cropWithPython(pythonCommand, sourcePath, outputPath, cropRect) {
+async function cropWithPython(pythonCommand, sourcePath, outputPath, cropRect, scale) {
   const result = await runProcess(
     pythonCommand,
     [
@@ -236,6 +261,10 @@ async function cropWithPython(pythonCommand, sourcePath, outputPath, cropRect) {
       String(cropRect.width),
       "--height",
       String(cropRect.height),
+      "--scale",
+      String(scale),
+      "--autocontrast",
+      "--white-background",
     ],
     { timeoutMs: 30_000 },
   );
@@ -248,19 +277,20 @@ async function cropWithPython(pythonCommand, sourcePath, outputPath, cropRect) {
 
 async function cropPageForRegion(page, region, pythonCommand = process.env.FLORIS_PYTHON || "python") {
   const cropRect = normalizeCropRect(region, page);
+  const scale = regionCropScale(cropRect);
   const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "floris-ocr-region-"));
   const outputPath = path.join(tempDirectory, "region.png");
 
   try {
     let pythonCrop = { error: "", ok: false };
     try {
-      pythonCrop = await cropWithPython(pythonCommand, page.imagePath, outputPath, cropRect);
+      pythonCrop = await cropWithPython(pythonCommand, page.imagePath, outputPath, cropRect, scale);
     } catch (error) {
       pythonCrop = { error: error instanceof Error ? error.message : String(error), ok: false };
     }
 
     if (!pythonCrop.ok) {
-      const nativeCropOk = await cropWithNativeImage(page.imagePath, outputPath, cropRect);
+      const nativeCropOk = await cropWithNativeImage(page.imagePath, outputPath, cropRect, scale);
       if (!nativeCropOk) {
         throw new Error(
           `Image crop failed. Python/Pillow: ${pythonCrop.error || "not available"}. Electron nativeImage could not crop this image.`,
@@ -275,24 +305,28 @@ async function cropPageForRegion(page, region, pythonCommand = process.env.FLORI
   return {
     cleanup: () => fs.rm(tempDirectory, { recursive: true, force: true }),
     cropRect,
+    scale,
     page: {
       ...page,
       imagePath: outputPath,
-      width: cropRect.width,
-      height: cropRect.height,
+      width: scaledDimension(cropRect.width, scale),
+      height: scaledDimension(cropRect.height, scale),
     },
   };
 }
 
-function offsetItemsToOriginalPage(items, cropRect, page) {
+function offsetItemsToOriginalPage(items, cropRect, page, scale = 1) {
+  const safeScale = Math.max(1, Number(scale) || 1);
   return items.map((item) => ({
     ...item,
     pageId: page.pageId,
     region: normalizeRegion(
       {
         ...item.region,
-        x: item.region.x + cropRect.x,
-        y: item.region.y + cropRect.y,
+        height: item.region.height / safeScale,
+        width: item.region.width / safeScale,
+        x: item.region.x / safeScale + cropRect.x,
+        y: item.region.y / safeScale + cropRect.y,
       },
       page.width,
       page.height,
@@ -637,7 +671,7 @@ class OcrProviderRegistry {
       return {
         cropRect: cropped.cropRect,
         languageDetected: result.languageDetected,
-        items: offsetItemsToOriginalPage(result.items, cropped.cropRect, page),
+        items: offsetItemsToOriginalPage(result.items, cropped.cropRect, page, cropped.scale),
       };
     } finally {
       await cropped.cleanup();
