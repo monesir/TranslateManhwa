@@ -10,6 +10,13 @@ const {
 } = require("./source-helpers.cjs");
 
 const BASE_URL = "https://www.mangabats.com";
+const CHAPTERS_PAGE_LIMIT = 500;
+
+const MANGABAT_JSON_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+  Accept: "application/json",
+};
 
 function slugFromUrl(url) {
   const parts = String(url).replace(/\/$/, "").split("/");
@@ -190,36 +197,49 @@ async function getTitleDetails(titleId) {
 
 async function listChapters(titleId) {
   const normalizedTitleId = String(titleId ?? "").trim();
-  const url = `${BASE_URL}/api/manga/${encodeURIComponent(normalizedTitleId)}/chapters`;
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-      Accept: "application/json",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`MangaBat chapters fetch failed: ${response.status}`);
-  }
-
-  const data = await response.json();
   const chapters = [];
+  const seen = new Set();
+  let offset = 0;
+  let hasMore = true;
 
-  if (!Array.isArray(data?.data?.chapters)) return chapters;
+  while (hasMore) {
+    const url = new URL(`/api/manga/${encodeURIComponent(normalizedTitleId)}/chapters`, BASE_URL);
+    url.searchParams.set("limit", String(CHAPTERS_PAGE_LIMIT));
+    url.searchParams.set("offset", String(offset));
 
-  for (const chapter of data.data.chapters) {
-    chapters.push({
-      chapterId: chapter.chapter_slug || String(chapter.chapter_num),
-      title: chapter.chapter_name || `Chapter ${chapter.chapter_num ?? "?"}`,
-      chapterNumber: chapter.chapter_num ?? null,
-      volumeNumber: null,
-      groupName: null,
-      releaseDate: chapter.updated_at || null,
-      canonicalUrl: `${BASE_URL}/manga/${normalizedTitleId}/${chapter.chapter_slug}`,
-      availability: "readable",
-      availabilityLabel: "Readable",
-    });
+    const response = await fetch(url, { headers: MANGABAT_JSON_HEADERS });
+
+    if (!response.ok) {
+      throw new Error(`MangaBat chapters fetch failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const pageChapters = Array.isArray(data?.data?.chapters) ? data.data.chapters : [];
+
+    for (const chapter of pageChapters) {
+      const chapterId = chapter.chapter_slug || String(chapter.chapter_num);
+      if (!chapterId || seen.has(chapterId)) continue;
+      seen.add(chapterId);
+      chapters.push({
+        chapterId,
+        title: chapter.chapter_name || `Chapter ${chapter.chapter_num ?? "?"}`,
+        chapterNumber: chapter.chapter_num ?? null,
+        volumeNumber: null,
+        groupName: null,
+        releaseDate: chapter.updated_at || null,
+        canonicalUrl: `${BASE_URL}/manga/${normalizedTitleId}/${chapterId}`,
+        availability: "readable",
+        availabilityLabel: "Readable",
+      });
+    }
+
+    const pagination = data?.data?.pagination ?? {};
+    const total = Number(pagination.total ?? 0);
+    const pageLimit = Number(pagination.limit ?? CHAPTERS_PAGE_LIMIT);
+    const pageOffset = Number(pagination.offset ?? offset);
+    const nextOffset = pageOffset + Math.max(pageChapters.length, pageLimit);
+    hasMore = Boolean(pagination.has_more) && pageChapters.length > 0 && nextOffset < total;
+    offset = nextOffset;
   }
 
   return chapters;
