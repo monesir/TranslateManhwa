@@ -2619,10 +2619,87 @@ function TranslationPage() {
     if (!source || !target || scrollSyncRef.current) return;
 
     scrollSyncRef.current = sourceName;
-    const sourceMaxLeft = Math.max(1, source.scrollWidth - source.clientWidth);
-    const targetMaxLeft = Math.max(0, target.scrollWidth - target.clientWidth);
-    target.scrollTop = source.scrollTop;
-    target.scrollLeft = (source.scrollLeft / sourceMaxLeft) * targetMaxLeft;
+
+    const clampScroll = (value: number, max: number) => Math.max(0, Math.min(max, value));
+    const pageElements = (pane: HTMLDivElement) =>
+      Array.from(pane.querySelectorAll<HTMLElement>(".mock-page[data-page-id]"));
+    const paneCenter = (pane: HTMLDivElement) => {
+      const rect = pane.getBoundingClientRect();
+      return {
+        x: rect.left + pane.clientWidth / 2,
+        y: rect.top + pane.clientHeight / 2,
+      };
+    };
+    const visiblePage = (pane: HTMLDivElement) => {
+      const pages = pageElements(pane);
+      if (pages.length === 0) return null;
+      if (viewerMode === "page") return pages[0];
+
+      const center = paneCenter(pane);
+      let bestPage = pages[0];
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const pageElement of pages) {
+        const rect = pageElement.getBoundingClientRect();
+        const containsCenter = rect.top <= center.y && rect.bottom >= center.y;
+        const distance = containsCenter ? 0 : Math.abs(center.y - (rect.top + rect.height / 2));
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestPage = pageElement;
+        }
+      }
+      return bestPage;
+    };
+
+    const sourcePage = visiblePage(source);
+    const targetPages = pageElements(target);
+    const targetPage =
+      targetPages.find((pageElement) => pageElement.dataset.pageId === sourcePage?.dataset.pageId) ??
+      targetPages[0];
+
+    if (!sourcePage || !targetPage) {
+      const sourceMaxTop = Math.max(1, source.scrollHeight - source.clientHeight);
+      const sourceMaxLeft = Math.max(1, source.scrollWidth - source.clientWidth);
+      target.scrollTo({
+        left: (source.scrollLeft / sourceMaxLeft) * Math.max(0, target.scrollWidth - target.clientWidth),
+        top: (source.scrollTop / sourceMaxTop) * Math.max(0, target.scrollHeight - target.clientHeight),
+      });
+      window.requestAnimationFrame(() => {
+        scrollSyncRef.current = null;
+      });
+      return;
+    }
+
+    const sourceCenter = paneCenter(source);
+    const targetRect = target.getBoundingClientRect();
+    const sourcePageRect = sourcePage.getBoundingClientRect();
+    const targetPageRect = targetPage.getBoundingClientRect();
+    const relativeX = Math.max(
+      0,
+      Math.min(1, (sourceCenter.x - sourcePageRect.left) / Math.max(1, sourcePageRect.width)),
+    );
+    const relativeY = Math.max(
+      0,
+      Math.min(1, (sourceCenter.y - sourcePageRect.top) / Math.max(1, sourcePageRect.height)),
+    );
+    const targetPointX = targetPageRect.left + targetPageRect.width * relativeX;
+    const targetPointY = targetPageRect.top + targetPageRect.height * relativeY;
+
+    target.scrollTo({
+      left: clampScroll(
+        target.scrollLeft + targetPointX - (targetRect.left + target.clientWidth / 2),
+        Math.max(0, target.scrollWidth - target.clientWidth),
+      ),
+      top: clampScroll(
+        target.scrollTop + targetPointY - (targetRect.top + target.clientHeight / 2),
+        Math.max(0, target.scrollHeight - target.clientHeight),
+      ),
+    });
+
+    const sourcePageId = sourcePage.dataset.pageId;
+    if (viewerMode === "webtoon" && sourcePageId && sourcePageId !== selectedPageId) {
+      setSelectedPageId(sourcePageId);
+    }
+
     window.requestAnimationFrame(() => {
       scrollSyncRef.current = null;
     });
@@ -3012,6 +3089,7 @@ function TranslationPage() {
   const renderOriginalPageSurface = (page: Page, units: TextUnit[], surfaceClassName = "") => (
     <div
       className={`mock-page original-page-surface page-tone-${page.imageTone} ${surfaceClassName}`.trim()}
+      data-page-id={page.id}
       style={pageSurfaceStyle(page)}
     >
       {renderPageArtwork(page)}
@@ -3063,6 +3141,7 @@ function TranslationPage() {
   const renderEditPageSurface = (page: Page, units: TextUnit[], marks: PageEditMark[], surfaceClassName = "") => (
     <div
       className={`mock-page edit-page-surface page-tone-${page.imageTone} ${surfaceClassName}`.trim()}
+      data-page-id={page.id}
       style={pageSurfaceStyle(page)}
     >
       {renderPageArtwork(page)}
