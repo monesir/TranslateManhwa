@@ -386,6 +386,66 @@ function loadImageElement(src: string) {
   });
 }
 
+function waitForImageElement(image: HTMLImageElement) {
+  if (image.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const handleLoad = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error("Rendered image could not be loaded for color sampling"));
+    };
+    const cleanup = () => {
+      image.removeEventListener("load", handleLoad);
+      image.removeEventListener("error", handleError);
+    };
+
+    image.addEventListener("load", handleLoad, { once: true });
+    image.addEventListener("error", handleError, { once: true });
+  });
+}
+
+function sampleColorFromCanvasImage(
+  image: CanvasImageSource,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  sourceWidth: number,
+  sourceHeight: number,
+) {
+  if (width <= 0 || height <= 0 || sourceWidth <= 0 || sourceHeight <= 0) {
+    throw new Error("Image dimensions are unavailable for color sampling");
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sourceWidth));
+  canvas.height = Math.max(1, Math.round(sourceHeight));
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("Canvas is unavailable for color sampling");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const pixelX = Math.max(0, Math.min(canvas.width - 1, Math.round((x / width) * (canvas.width - 1))));
+  const pixelY = Math.max(0, Math.min(canvas.height - 1, Math.round((y / height) * (canvas.height - 1))));
+  const [red, green, blue] = context.getImageData(pixelX, pixelY, 1, 1).data;
+  return rgbToHex(red, green, blue);
+}
+
+async function sampleColorFromRenderedImage(
+  image: HTMLImageElement,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  await waitForImageElement(image);
+  return sampleColorFromCanvasImage(image, x, y, width, height, image.naturalWidth, image.naturalHeight);
+}
+
 async function sampleColorFromImageUrl(imageUrl: string, x: number, y: number, width: number, height: number) {
   const response = await fetch(imageUrl);
   if (!response.ok) throw new Error("Image could not be fetched for color sampling");
@@ -393,16 +453,7 @@ async function sampleColorFromImageUrl(imageUrl: string, x: number, y: number, w
   const objectUrl = URL.createObjectURL(blob);
   try {
     const image = await loadImageElement(objectUrl);
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(width));
-    canvas.height = Math.max(1, Math.round(height));
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) throw new Error("Canvas is unavailable for color sampling");
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const pixelX = Math.max(0, Math.min(canvas.width - 1, Math.round(x)));
-    const pixelY = Math.max(0, Math.min(canvas.height - 1, Math.round(y)));
-    const [red, green, blue] = context.getImageData(pixelX, pixelY, 1, 1).data;
-    return rgbToHex(red, green, blue);
+    return sampleColorFromCanvasImage(image, x, y, width, height, image.naturalWidth, image.naturalHeight);
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
@@ -2823,7 +2874,13 @@ function TranslationPage() {
     }
 
     try {
-      const color = await sampleColorFromImageUrl(page.imageUrl, point.x, point.y, page.width, page.height);
+      const pageSurface = event.currentTarget.closest(".mock-page");
+      const renderedImage = pageSurface?.querySelector<HTMLImageElement>(".page-image");
+      const color = renderedImage
+        ? await sampleColorFromRenderedImage(renderedImage, point.x, point.y, page.width, page.height).catch(() =>
+            sampleColorFromImageUrl(page.imageUrl ?? "", point.x, point.y, page.width, page.height),
+          )
+        : await sampleColorFromImageUrl(page.imageUrl, point.x, point.y, page.width, page.height);
       setBrushColor(color);
       setColorPickStatus(color);
       setActiveTool("draw");
@@ -3071,6 +3128,9 @@ function TranslationPage() {
       onPointerMove={(event) => moveDrawing(event, page)}
       onPointerUp={(event) => endDrawing(event, page)}
     >
+      {activeTool === "draw" || activeTool === "color-picker" ? (
+        <rect className="page-pointer-hitbox" x={0} y={0} width={page.width} height={page.height} />
+      ) : null}
       {marks.map((mark) => renderEditMarkPath(mark))}
       {drawStroke?.pageId === page.id && drawStroke.points.length > 0 ? (
         <path
@@ -3111,6 +3171,9 @@ function TranslationPage() {
         onPointerUp={(event) => endOcrSelection(event, page)}
         onPointerCancel={(event) => endOcrSelection(event, page, false)}
       >
+        {activeTool === "ocr" || activeTool === "color-picker" ? (
+          <rect className="page-pointer-hitbox" x={0} y={0} width={page.width} height={page.height} />
+        ) : null}
         {units.map((unit) => (
           <rect
             key={unit.id}

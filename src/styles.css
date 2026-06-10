@@ -1568,6 +1568,11 @@ h3 {
   cursor: copy;
 }
 
+.page-pointer-hitbox {
+  fill: transparent;
+  pointer-events: all;
+}
+
 .edit-mark-path.preview {
   opacity: 0.82;
 }
@@ -1877,6 +1882,10 @@ h3 {
 }
 
 .region-layer.is-selecting .region {
+  pointer-events: none;
+}
+
+.region-layer.is-color-picking .region {
   pointer-events: none;
 }
 
