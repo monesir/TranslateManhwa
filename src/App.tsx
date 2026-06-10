@@ -294,12 +294,11 @@ const MIN_BRUSH_SIZE = 2;
 const MAX_BRUSH_SIZE = 96;
 const DEFAULT_BRUSH_SIZE = 34;
 const DEFAULT_BRUSH_COLOR = "#FFFFFF";
-const MIN_CLEAN_MASK_EXPANSION = 0;
+const MIN_CLEAN_STRENGTH = 1;
+const MAX_CLEAN_STRENGTH = 12;
+const DEFAULT_CLEAN_STRENGTH = 4;
 const MAX_CLEAN_MASK_EXPANSION = 18;
-const DEFAULT_CLEAN_MASK_EXPANSION = 4;
-const MIN_CLEAN_FEATHER = 0;
 const MAX_CLEAN_FEATHER = 16;
-const DEFAULT_CLEAN_FEATHER = 2;
 
 function clampTextUnitFontSize(value: number) {
   if (!Number.isFinite(value)) return 18;
@@ -371,14 +370,17 @@ function clampBrushSize(value: number) {
   return Math.max(MIN_BRUSH_SIZE, Math.min(MAX_BRUSH_SIZE, Math.round(value)));
 }
 
-function clampCleanMaskExpansion(value: number) {
-  if (!Number.isFinite(value)) return DEFAULT_CLEAN_MASK_EXPANSION;
-  return Math.max(MIN_CLEAN_MASK_EXPANSION, Math.min(MAX_CLEAN_MASK_EXPANSION, Math.round(value)));
+function clampCleanStrength(value: number) {
+  if (!Number.isFinite(value)) return DEFAULT_CLEAN_STRENGTH;
+  return Math.max(MIN_CLEAN_STRENGTH, Math.min(MAX_CLEAN_STRENGTH, Math.round(value)));
 }
 
-function clampCleanFeather(value: number) {
-  if (!Number.isFinite(value)) return DEFAULT_CLEAN_FEATHER;
-  return Math.max(MIN_CLEAN_FEATHER, Math.min(MAX_CLEAN_FEATHER, Math.round(value)));
+function cleanSettingsFromStrength(strengthValue: number) {
+  const strength = clampCleanStrength(strengthValue);
+  return {
+    feather: Math.max(0, Math.min(MAX_CLEAN_FEATHER, Math.round(strength / 2))),
+    maskExpansion: Math.max(0, Math.min(MAX_CLEAN_MASK_EXPANSION, strength)),
+  };
 }
 
 function pointsToSvgPath(points: PageEditPoint[]) {
@@ -2548,8 +2550,7 @@ function TranslationPage() {
   const [drawStroke, setDrawStroke] = useState<DrawStrokeState | null>(null);
   const [brushColor, setBrushColor] = useState(DEFAULT_BRUSH_COLOR);
   const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE);
-  const [cleanFeather, setCleanFeather] = useState(DEFAULT_CLEAN_FEATHER);
-  const [cleanMaskExpansion, setCleanMaskExpansion] = useState(DEFAULT_CLEAN_MASK_EXPANSION);
+  const [cleanStrength, setCleanStrength] = useState(DEFAULT_CLEAN_STRENGTH);
   const [cleanMethod, setCleanMethod] = useState<"telea" | "ns">("telea");
   const [cleanStatus, setCleanStatus] = useState("");
   const [colorPickStatus, setColorPickStatus] = useState("");
@@ -3112,10 +3113,11 @@ function TranslationPage() {
     const region = normalizeSelectionRegion(selection);
     if (!region || cleanPageTextMutation.isPending) return;
     setCleanStatus("Cleaning...");
+    const cleanSettings = cleanSettingsFromStrength(cleanStrength);
     cleanPageTextMutation.mutate({
       input: {
-        feather: cleanFeather,
-        maskExpansion: cleanMaskExpansion,
+        feather: cleanSettings.feather,
+        maskExpansion: cleanSettings.maskExpansion,
         method: cleanMethod,
         region,
       },
@@ -3916,45 +3918,24 @@ function TranslationPage() {
               </select>
             </label>
             <div className="brush-size-row">
-              <span>Expand</span>
+              <span>Strength</span>
               <input
                 className="brush-size-range"
                 disabled={cleanPageTextMutation.isPending}
-                max={MAX_CLEAN_MASK_EXPANSION}
-                min={MIN_CLEAN_MASK_EXPANSION}
-                onChange={(event) => setCleanMaskExpansion(clampCleanMaskExpansion(Number(event.target.value)))}
+                max={MAX_CLEAN_STRENGTH}
+                min={MIN_CLEAN_STRENGTH}
+                onChange={(event) => setCleanStrength(clampCleanStrength(Number(event.target.value)))}
                 type="range"
-                value={cleanMaskExpansion}
+                value={cleanStrength}
               />
               <input
                 className="brush-size-input"
                 disabled={cleanPageTextMutation.isPending}
-                max={MAX_CLEAN_MASK_EXPANSION}
-                min={MIN_CLEAN_MASK_EXPANSION}
-                onChange={(event) => setCleanMaskExpansion(clampCleanMaskExpansion(Number(event.target.value)))}
+                max={MAX_CLEAN_STRENGTH}
+                min={MIN_CLEAN_STRENGTH}
+                onChange={(event) => setCleanStrength(clampCleanStrength(Number(event.target.value)))}
                 type="number"
-                value={cleanMaskExpansion}
-              />
-            </div>
-            <div className="brush-size-row">
-              <span>Feather</span>
-              <input
-                className="brush-size-range"
-                disabled={cleanPageTextMutation.isPending}
-                max={MAX_CLEAN_FEATHER}
-                min={MIN_CLEAN_FEATHER}
-                onChange={(event) => setCleanFeather(clampCleanFeather(Number(event.target.value)))}
-                type="range"
-                value={cleanFeather}
-              />
-              <input
-                className="brush-size-input"
-                disabled={cleanPageTextMutation.isPending}
-                max={MAX_CLEAN_FEATHER}
-                min={MIN_CLEAN_FEATHER}
-                onChange={(event) => setCleanFeather(clampCleanFeather(Number(event.target.value)))}
-                type="number"
-                value={cleanFeather}
+                value={cleanStrength}
               />
             </div>
             {cleanStatus ? <small className="brush-status">{cleanStatus}</small> : null}
