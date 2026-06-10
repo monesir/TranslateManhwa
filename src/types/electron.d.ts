@@ -14,6 +14,7 @@ import type {
   OcrRunResult,
   PageColorSampleInput,
   PageColorSampleResult,
+  PageCleanTextInput,
   PageEditMark,
   PageEditMarkInput,
   Project,
@@ -68,6 +69,7 @@ interface FlorisApi {
   addPageEditMark(input: PageEditMarkInput): Promise<PageEditMark>;
   deletePageEditMark(markId: string): Promise<{ chapterId: string; id: string; pageId: string }>;
   samplePageColor(pageId: string, input: PageColorSampleInput): Promise<PageColorSampleResult>;
+  cleanPageText(pageId: string, input: PageCleanTextInput): Promise<PageEditMark>;
   addCharacter(projectId: string, input: CharacterInput): Promise<Character>;
   updateCharacter(
     characterId: string,

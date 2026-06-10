@@ -453,6 +453,33 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 6,
+    name: "page_clean_patches",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS page_clean_patches (
+          id TEXT PRIMARY KEY,
+          chapter_id TEXT NOT NULL,
+          page_id TEXT NOT NULL,
+          region_json TEXT NOT NULL,
+          patch_path TEXT NOT NULL,
+          method TEXT NOT NULL DEFAULT 'telea'
+            CHECK (method IN ('telea', 'ns')),
+          mask_expansion INTEGER NOT NULL DEFAULT 4,
+          feather INTEGER NOT NULL DEFAULT 2,
+          opacity REAL NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+          FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_page_clean_patches_chapter_page
+          ON page_clean_patches(chapter_id, page_id, created_at);
+      `);
+    },
+  },
 ];
 
 function ensureMigrationTable(db) {

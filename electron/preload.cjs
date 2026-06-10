@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld("florisApi", {
   addPageEditMark: invoke("data:addPageEditMark"),
   deletePageEditMark: invoke("data:deletePageEditMark"),
   samplePageColor: invoke("data:samplePageColor"),
+  cleanPageText: invoke("data:cleanPageText"),
   addCharacter: invoke("data:addCharacter"),
   updateCharacter: invoke("data:updateCharacter"),
   deleteCharacter: invoke("data:deleteCharacter"),

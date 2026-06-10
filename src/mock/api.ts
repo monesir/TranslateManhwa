@@ -17,6 +17,7 @@ import type {
   Page,
   PageColorSampleInput,
   PageColorSampleResult,
+  PageCleanTextInput,
   PageEditMark,
   PageEditMarkInput,
   Project,
@@ -719,6 +720,31 @@ export async function samplePageColor(
   const page = mutablePages.find((item) => item.id === pageId);
   if (!page) throw new Error("Page not found");
   return delay({ color: "#000000", engine: "mock", pixelX: 0, pixelY: 0 }, 40);
+}
+
+export async function cleanPageText(pageId: string, input: PageCleanTextInput): Promise<PageEditMark> {
+  if (window.florisApi) return window.florisApi.cleanPageText(pageId, input);
+
+  const page = mutablePages.find((item) => item.id === pageId);
+  if (!page) throw new Error("Page not found");
+  const timestamp = new Date().toISOString();
+  const mark: PageEditMark = {
+    id: `page_clean_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    chapterId: page.chapterId,
+    pageId: page.id,
+    kind: "clean_patch",
+    feather: input.feather,
+    maskExpansion: input.maskExpansion,
+    method: input.method,
+    opacity: 1,
+    patchUrl:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR4nGNgYGAAAAAEAAGjChXjAAAAAElFTkSuQmCC",
+    region: input.region,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  mutablePageEditMarks = [...mutablePageEditMarks, mark];
+  return delay(mark, 120);
 }
 
 export async function addCharacter(

@@ -1850,7 +1850,8 @@ h3 {
 }
 
 .edit-drawing-layer.is-drawing,
-.edit-drawing-layer.is-color-picking {
+.edit-drawing-layer.is-color-picking,
+.edit-drawing-layer.is-cleaning {
   pointer-events: auto;
 }
 
@@ -1862,9 +1863,17 @@ h3 {
   cursor: copy;
 }
 
+.edit-drawing-layer.is-cleaning {
+  cursor: crosshair;
+}
+
 .page-pointer-hitbox {
   fill: transparent;
   pointer-events: all;
+}
+
+.clean-patch-image {
+  pointer-events: none;
 }
 
 .edit-mark-path.preview {
@@ -2157,11 +2166,16 @@ h3 {
   cursor: copy;
 }
 
+.region-layer.is-cleaning {
+  cursor: crosshair;
+}
+
 .region-layer.is-selecting .region {
   pointer-events: none;
 }
 
-.region-layer.is-color-picking .region {
+.region-layer.is-color-picking .region,
+.region-layer.is-cleaning .region {
   pointer-events: none;
 }
 
@@ -2176,6 +2190,14 @@ h3 {
   fill: rgba(217, 164, 65, 0.18);
   stroke: #f0c66d;
   stroke-dasharray: 12 8;
+  stroke-width: 4;
+  pointer-events: none;
+}
+
+.clean-selection-region {
+  fill: rgba(92, 201, 178, 0.14);
+  stroke: #5cc9b2;
+  stroke-dasharray: 10 7;
   stroke-width: 4;
   pointer-events: none;
 }
@@ -2215,6 +2237,31 @@ h3 {
 .draw-panel {
   display: grid;
   gap: 12px;
+}
+
+.clean-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.clean-control {
+  display: grid;
+  gap: 6px;
+}
+
+.clean-control span {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.clean-control select {
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #10171b;
+  color: var(--text);
 }
 
 .brush-color-row,

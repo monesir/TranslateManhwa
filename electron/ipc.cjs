@@ -49,6 +49,8 @@ function registerIpcHandlers(appApi) {
       appApi.deletePageEditMark(markId),
     "data:samplePageColor": (_event, pageId, input) =>
       appApi.samplePageColor(pageId, input),
+    "data:cleanPageText": (_event, pageId, input) =>
+      appApi.cleanPageText(pageId, input),
     "data:addCharacter": (_event, projectId, input) => appApi.addCharacter(projectId, input),
     "data:updateCharacter": (_event, characterId, input) =>
       appApi.updateCharacter(characterId, input),

@@ -137,6 +137,29 @@ function mapPageEditMarkRow(row) {
   };
 }
 
+function mapPageCleanPatchRow(row) {
+  return {
+    id: row.id,
+    chapterId: row.chapter_id,
+    pageId: row.page_id,
+    kind: "clean_patch",
+    method: row.method ?? "telea",
+    maskExpansion: Number(row.mask_expansion ?? 4),
+    feather: Number(row.feather ?? 2),
+    opacity: normalizeOpacity(row.opacity),
+    patchUrl: row.patch_path,
+    region: normalizeRegionBox(parseJson(row.region_json, null), {
+      type: "box",
+      x: 0,
+      y: 0,
+      width: 16,
+      height: 12,
+    }),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 class TranslationWorkspaceRepository {
   constructor(db) {
     this.db = db;
@@ -266,6 +289,16 @@ class TranslationWorkspaceRepository {
       WHERE chapter_id = ?
       ORDER BY created_at ASC, id ASC
     `).all(chapterId).map(mapPageEditMarkRow);
+    const pageCleanPatches = this.db.prepare(`
+      SELECT *
+      FROM page_clean_patches
+      WHERE chapter_id = ?
+      ORDER BY created_at ASC, id ASC
+    `).all(chapterId).map(mapPageCleanPatchRow);
+    const pageEdits = [...pageEditMarks, ...pageCleanPatches].sort((first, second) => {
+      const byDate = String(first.createdAt).localeCompare(String(second.createdAt));
+      return byDate === 0 ? String(first.id).localeCompare(String(second.id)) : byDate;
+    });
 
     const dictionary = this.dictionaryRepository.getProjectDictionary(chapter.projectId);
 
@@ -273,7 +306,7 @@ class TranslationWorkspaceRepository {
       project,
       chapter,
       pages,
-      pageEditMarks,
+      pageEditMarks: pageEdits,
       textUnits: hydratedTextUnits,
       characters: dictionary.characters,
       glossaryTerms: dictionary.glossaryTerms,
@@ -580,10 +613,14 @@ class TranslationWorkspaceRepository {
 
   deletePageEditMark(markId) {
     const existing = this.db.prepare(`
-      SELECT id, chapter_id, page_id
+      SELECT id, chapter_id, page_id, 'brush' AS source
       FROM page_edit_marks
       WHERE id = ?
-    `).get(markId);
+      UNION ALL
+      SELECT id, chapter_id, page_id, 'clean_patch' AS source
+      FROM page_clean_patches
+      WHERE id = ?
+    `).get(markId, markId);
 
     if (!existing) {
       throw new Error("Page edit mark not found");
@@ -592,7 +629,11 @@ class TranslationWorkspaceRepository {
     const timestamp = new Date().toISOString();
     this.db.exec("BEGIN");
     try {
-      this.db.prepare("DELETE FROM page_edit_marks WHERE id = ?").run(markId);
+      if (existing.source === "clean_patch") {
+        this.db.prepare("DELETE FROM page_clean_patches WHERE id = ?").run(markId);
+      } else {
+        this.db.prepare("DELETE FROM page_edit_marks WHERE id = ?").run(markId);
+      }
       this.db.prepare("UPDATE chapters SET updated_at = ? WHERE id = ?").run(timestamp, existing.chapter_id);
       this.db.prepare(`
         UPDATE projects

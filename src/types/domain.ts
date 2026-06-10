@@ -285,11 +285,16 @@ export interface PageEditMark {
   id: string;
   chapterId: string;
   pageId: string;
-  kind: "brush";
-  color: string;
-  size: number;
+  kind: "brush" | "clean_patch";
+  color?: string;
+  feather?: number;
+  maskExpansion?: number;
+  method?: "telea" | "ns";
   opacity: number;
-  points: PageEditPoint[];
+  patchUrl?: string;
+  points?: PageEditPoint[];
+  region?: RegionBox;
+  size?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -417,12 +422,20 @@ export interface PageColorSampleResult {
   pixelY: number;
 }
 
+export interface PageCleanTextInput {
+  feather: number;
+  maskExpansion: number;
+  method: "telea" | "ns";
+  region: RegionBox;
+}
+
 export type ActiveTool =
   | "pan"
   | "select"
   | "ocr"
   | "draw"
   | "color-picker"
+  | "clean"
   | "translate"
   | "review"
   | "typeset"
