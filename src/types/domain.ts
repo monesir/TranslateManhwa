@@ -404,6 +404,19 @@ export interface ChapterTextSizeInput {
   delta: number;
 }
 
+export interface PageColorSampleInput {
+  x: number;
+  y: number;
+}
+
+export interface PageColorSampleResult {
+  color: string;
+  engine: string;
+  fallbackReason?: string;
+  pixelX: number;
+  pixelY: number;
+}
+
 export type ActiveTool =
   | "pan"
   | "select"

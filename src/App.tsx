@@ -90,6 +90,7 @@ import {
   runOcrForChapter,
   runOcrForPage,
   runOcrForRegion,
+  samplePageColor,
   searchSourceTitles,
   updateCharacter,
   updateChapterTextSize,
@@ -2931,29 +2932,47 @@ function TranslationPage() {
       y: Math.max(0, Math.min(page.height, y)),
     };
   };
-  const pickColorFromPage = async (event: PointerEvent<SVGSVGElement>, page: Page) => {
+  const pointFromElement = (event: PointerEvent<Element>, page: Page) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - bounds.left) / bounds.width) * page.width;
+    const y = ((event.clientY - bounds.top) / bounds.height) * page.height;
+    return {
+      x: Math.max(0, Math.min(page.width, x)),
+      y: Math.max(0, Math.min(page.height, y)),
+    };
+  };
+  const pickColorFromPage = async (event: PointerEvent<Element>, page: Page) => {
     if (activeTool !== "color-picker") return;
     event.preventDefault();
     event.stopPropagation();
-    const point = pointFromSvg(event, page);
+    const point = pointFromElement(event, page);
     if (!page.imageUrl || !isRenderableImageUrl(page.imageUrl)) {
       setColorPickStatus("No image color");
       return;
     }
 
+    setColorPickStatus("Picking...");
     try {
-      const pageSurface = event.currentTarget.closest(".mock-page");
-      const renderedImage = pageSurface?.querySelector<HTMLImageElement>(".page-image");
-      const color = renderedImage
-        ? await sampleColorFromRenderedImage(renderedImage, point.x, point.y, page.width, page.height).catch(() =>
-            sampleColorFromImageUrl(page.imageUrl ?? "", point.x, point.y, page.width, page.height),
-          )
-        : await sampleColorFromImageUrl(page.imageUrl, point.x, point.y, page.width, page.height);
+      const sampled = await samplePageColor(page.id, { x: point.x, y: point.y });
+      const color = sampled.color;
       setBrushColor(color);
-      setColorPickStatus(color);
+      setColorPickStatus(`${color} (${sampled.engine})`);
       setActiveTool("draw");
     } catch (error) {
-      setColorPickStatus(error instanceof Error ? error.message : "Color pick failed");
+      try {
+        const pageSurface = event.currentTarget.closest(".mock-page");
+        const renderedImage = pageSurface?.querySelector<HTMLImageElement>(".page-image");
+        const color = renderedImage
+          ? await sampleColorFromRenderedImage(renderedImage, point.x, point.y, page.width, page.height).catch(() =>
+              sampleColorFromImageUrl(page.imageUrl ?? "", point.x, point.y, page.width, page.height),
+            )
+          : await sampleColorFromImageUrl(page.imageUrl, point.x, point.y, page.width, page.height);
+        setBrushColor(color);
+        setColorPickStatus(`${color} (browser fallback)`);
+        setActiveTool("draw");
+      } catch {
+        setColorPickStatus(error instanceof Error ? error.message : "Color pick failed");
+      }
     }
   };
   const appendDrawPoint = (point: PageEditPoint) => {
@@ -3216,8 +3235,13 @@ function TranslationPage() {
   );
   const renderOriginalPageSurface = (page: Page, units: TextUnit[], surfaceClassName = "") => (
     <div
-      className={`mock-page original-page-surface page-tone-${page.imageTone} ${surfaceClassName}`.trim()}
+      className={`mock-page original-page-surface page-tone-${page.imageTone} ${
+        activeTool === "color-picker" ? "is-color-picking" : ""
+      } ${surfaceClassName}`.trim()}
       data-page-id={page.id}
+      onPointerDown={(event) => {
+        if (activeTool === "color-picker") void pickColorFromPage(event, page);
+      }}
       style={pageSurfaceStyle(page)}
     >
       {renderPageArtwork(page)}
@@ -3271,8 +3295,13 @@ function TranslationPage() {
   );
   const renderEditPageSurface = (page: Page, units: TextUnit[], marks: PageEditMark[], surfaceClassName = "") => (
     <div
-      className={`mock-page edit-page-surface page-tone-${page.imageTone} ${surfaceClassName}`.trim()}
+      className={`mock-page edit-page-surface page-tone-${page.imageTone} ${
+        activeTool === "color-picker" ? "is-color-picking" : ""
+      } ${surfaceClassName}`.trim()}
       data-page-id={page.id}
+      onPointerDown={(event) => {
+        if (activeTool === "color-picker") void pickColorFromPage(event, page);
+      }}
       style={pageSurfaceStyle(page)}
     >
       {renderPageArtwork(page)}

@@ -4,6 +4,7 @@ const { ChapterPageStore } = require("../data/chapter-page-store.cjs");
 const { CoverCache } = require("../data/cover-cache.cjs");
 const { DictionaryRepository } = require("../data/repositories/dictionary-repository.cjs");
 const { OcrService } = require("./ocr-service.cjs");
+const { PageColorService } = require("./page-color-service.cjs");
 const {
   SourceImportRepository,
   sourceChapterId,
@@ -28,6 +29,7 @@ function createAppApi(db, options = {}) {
   const sourceImportRepository = new SourceImportRepository(db, { chapterPageStore, coverCache });
   const translationWorkspaceRepository = new TranslationWorkspaceRepository(db);
   const ocrService = new OcrService(db, { workspacePath: options.workspacePath });
+  const pageColorService = new PageColorService(db, { workspacePath: options.workspacePath });
 
   return {
     listProjects() {
@@ -84,6 +86,10 @@ function createAppApi(db, options = {}) {
 
     deletePageEditMark(markId) {
       return translationWorkspaceRepository.deletePageEditMark(markId);
+    },
+
+    samplePageColor(pageId, input) {
+      return pageColorService.samplePageColor(pageId, input);
     },
 
     listOcrProviders(languageHint) {

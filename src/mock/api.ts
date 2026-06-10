@@ -15,6 +15,8 @@ import type {
   OcrRunOptions,
   OcrRunResult,
   Page,
+  PageColorSampleInput,
+  PageColorSampleResult,
   PageEditMark,
   PageEditMarkInput,
   Project,
@@ -706,6 +708,17 @@ export async function deletePageEditMark(
   if (!existing) throw new Error("Page edit mark not found");
   mutablePageEditMarks = mutablePageEditMarks.filter((mark) => mark.id !== markId);
   return delay({ chapterId: existing.chapterId, id: existing.id, pageId: existing.pageId }, 80);
+}
+
+export async function samplePageColor(
+  pageId: string,
+  input: PageColorSampleInput,
+): Promise<PageColorSampleResult> {
+  if (window.florisApi) return window.florisApi.samplePageColor(pageId, input);
+
+  const page = mutablePages.find((item) => item.id === pageId);
+  if (!page) throw new Error("Page not found");
+  return delay({ color: "#000000", engine: "mock", pixelX: 0, pixelY: 0 }, 40);
 }
 
 export async function addCharacter(
