@@ -673,8 +673,6 @@ function SidebarSubLink({
 }
 
 function AppShell() {
-  const runtimeLabel = window.florisApi ? "Electron runtime" : "Local UI build";
-  const dataLabel = window.florisApi ? "SQLite data" : "No SQLite connection";
   const location = useLocation();
   const navigate = useNavigate();
   const [libraryExpanded, setLibraryExpanded] = useState(true);
@@ -759,7 +757,8 @@ function AppShell() {
                 </div>
               ) : null}
             </div>
-
+          </div>
+          <div style={{ padding: '0 0 16px 0' }}>
             <NavLink
               className={({ isActive }) =>
                 isActive || isSettingsView ? "sidebar-nav-item active" : "sidebar-nav-item"
@@ -771,11 +770,6 @@ function AppShell() {
               </span>
               <span>Settings</span>
             </NavLink>
-          </div>
-
-          <div className="sidebar-status">
-            <span>{runtimeLabel}</span>
-            <strong>{dataLabel}</strong>
           </div>
         </aside>
       )}
@@ -854,40 +848,42 @@ function LibraryPage() {
 
   return (
     <section className="page">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Workspace</p>
-          <h1>Library</h1>
-        </div>
+      <header className="library-header">
+        {stats ? (
+          <div className="library-header-stats">
+            <div className="header-stat-group">
+              <span className="header-stat-label"><BookOpen size={13} /> Last worked chapter</span>
+              <strong className="header-stat-value" title={stats.lastWorkedChapter}>{stats.lastWorkedChapter}</strong>
+            </div>
+            <div className="header-stat-divider" />
+            <div className="header-stat-group">
+              <span className="header-stat-label"><Save size={13} /> Last modified</span>
+              <strong className="header-stat-value">{formatDate(stats.lastModifiedAt)}</strong>
+            </div>
+            <div className="header-stat-divider" />
+            <div className="header-stat-group">
+              <span className="header-stat-label"><LibraryIcon size={13} /> Projects</span>
+              <strong className="header-stat-value">{stats.activeProjects}</strong>
+            </div>
+            <div className="header-stat-divider" />
+            <div className="header-stat-group">
+              <span className="header-stat-label" style={{ color: "#4caf50" }}><CheckCircle2 size={13} /> Completed</span>
+              <strong className="header-stat-value">{stats.completedChapters}</strong>
+            </div>
+          </div>
+        ) : <div />}
+        
         <div className="header-actions">
-          <button className="button secondary">
+          <button className="floirs-button">
             <Filter size={16} />
             Filter
           </button>
-          <button className="button primary" onClick={() => setIsCreateProjectOpen(true)}>
+          <button className="floirs-button" onClick={() => setIsCreateProjectOpen(true)}>
             <Plus size={16} />
             New project
           </button>
         </div>
       </header>
-
-      {stats ? (
-        <div className="stats-strip">
-          <StatCard label="Last worked chapter" value={stats.lastWorkedChapter} icon={<BookOpen />} />
-          <StatCard label="Last modified" value={formatDate(stats.lastModifiedAt)} icon={<Save />} />
-          <StatCard label="Active projects" value={String(stats.activeProjects)} icon={<LibraryIcon />} />
-          <StatCard
-            label="Chapters in progress"
-            value={String(stats.chaptersInProgress)}
-            icon={<Gauge />}
-          />
-          <StatCard
-            label="Completed chapters"
-            value={String(stats.completedChapters)}
-            icon={<CheckCircle2 />}
-          />
-        </div>
-      ) : null}
 
       <div className="project-grid">
         {projects.map((project) => (
@@ -941,10 +937,9 @@ function CreateProjectDialog({
       >
         <div className="modal-head">
           <div>
-            <p className="eyebrow">Library</p>
             <h2>New project</h2>
           </div>
-          <button className="icon-button" onClick={onClose} type="button" title="Close">
+          <button className="floirs-button floirs-button--icon" onClick={onClose} type="button" title="Close">
             <X size={16} />
           </button>
         </div>
@@ -953,6 +948,7 @@ function CreateProjectDialog({
           <label className="form-field">
             <span>Project name</span>
             <input
+              dir="auto"
               autoFocus
               required
               value={form.title}
@@ -962,6 +958,7 @@ function CreateProjectDialog({
           <label className="form-field">
             <span>Original title</span>
             <input
+              dir="auto"
               value={form.originalTitle}
               onChange={(event) => onChange({ ...form, originalTitle: event.target.value })}
             />
@@ -969,7 +966,7 @@ function CreateProjectDialog({
           <label className="form-field">
             <span>Arabic title</span>
             <input
-              dir="rtl"
+              dir="auto"
               value={form.arabicTitle}
               onChange={(event) => onChange({ ...form, arabicTitle: event.target.value })}
             />
@@ -977,6 +974,7 @@ function CreateProjectDialog({
           <label className="form-field">
             <span>Source language</span>
             <input
+              dir="auto"
               value={form.sourceLanguage}
               onChange={(event) => onChange({ ...form, sourceLanguage: event.target.value })}
             />
@@ -984,6 +982,7 @@ function CreateProjectDialog({
           <label className="form-field">
             <span>Target language</span>
             <input
+              dir="auto"
               value={form.targetLanguage}
               onChange={(event) => onChange({ ...form, targetLanguage: event.target.value })}
             />
@@ -991,6 +990,7 @@ function CreateProjectDialog({
           <label className="form-field">
             <span>Genres</span>
             <input
+              dir="auto"
               placeholder="Action, Fantasy"
               value={form.genres}
               onChange={(event) => onChange({ ...form, genres: event.target.value })}
@@ -999,15 +999,27 @@ function CreateProjectDialog({
           <label className="form-field full">
             <span>Description</span>
             <textarea
+              dir="auto"
               value={form.description}
               onChange={(event) => onChange({ ...form, description: event.target.value })}
+              onInput={(event) => {
+                const target = event.currentTarget;
+                target.style.height = "auto";
+                target.style.height = `${target.scrollHeight}px`;
+              }}
             />
           </label>
           <label className="form-field full">
             <span>Work context</span>
             <textarea
+              dir="auto"
               value={form.contextSummary}
               onChange={(event) => onChange({ ...form, contextSummary: event.target.value })}
+              onInput={(event) => {
+                const target = event.currentTarget;
+                target.style.height = "auto";
+                target.style.height = `${target.scrollHeight}px`;
+              }}
             />
           </label>
         </div>
@@ -1015,11 +1027,11 @@ function CreateProjectDialog({
         {error ? <p className="error-line">{error}</p> : null}
 
         <div className="form-actions">
-          <button className="button primary" disabled={isSaving} type="submit">
+          <button className="floirs-button" disabled={isSaving} type="submit">
             <Save size={16} />
             {isSaving ? "Creating" : "Create project"}
           </button>
-          <button className="button secondary" disabled={isSaving} onClick={onClose} type="button">
+          <button className="floirs-button" disabled={isSaving} onClick={onClose} type="button">
             Cancel
           </button>
         </div>
@@ -1041,26 +1053,27 @@ function StatCard({ label, value, icon }: { label: string; value: string; icon: 
 function ProjectCard({ project }: { project: Project }) {
   return (
     <Link className="project-card" to={`/projects/${project.id}`}>
+      {project.coverUrl && (
+        <div 
+          className="project-card-bg" 
+          style={{ backgroundImage: `url(${project.coverUrl})` }} 
+        />
+      )}
       <ProjectCover project={project} />
       <div className="project-card-body">
-        <div className="project-card-title">
-          <div>
-            <h2>{project.title}</h2>
-            <p>{project.originalTitle}</p>
+        <div className="project-card-header">
+          <h2>{project.title}</h2>
+        </div>
+
+        <div className="project-meta-elegant">
+          <div className="meta-item">
+            <span>Last ch.</span>
+            <strong>{project.lastWorkedChapterLabel ?? "None"}</strong>
           </div>
-          <span className={`status-chip ${statusClass(project.status)}`}>{project.status}</span>
-        </div>
-        <div className="meta-grid">
-          <span>Last chapter</span>
-          <strong>{project.lastWorkedChapterLabel ?? "None"}</strong>
-          <span>Last modified</span>
-          <strong>{formatDate(project.lastModifiedAt)}</strong>
-          <span>Language</span>
-          <strong>{project.sourceLanguage}</strong>
-        </div>
-        <div className="project-progress">
-          <ProgressBar value={project.progress} />
-          <span>{project.progress}%</span>
+          <div className="meta-item">
+            <span>Last modified</span>
+            <strong>{formatDate(project.lastModifiedAt)}</strong>
+          </div>
         </div>
       </div>
     </Link>
@@ -1165,38 +1178,26 @@ function ExplorerPage() {
   return (
     <section className="page">
       <header className="page-header">
-        <div>
-          <p className="eyebrow">Sources</p>
-          <h1>Explorer</h1>
-        </div>
-        <div className="search-box">
-          <Search size={16} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search series" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div className="floirs-search-shell">
+            <input
+              className="floirs-search-input"
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search series"
+            />
+            <Search size={16} />
+          </div>
+          <button 
+            className="floirs-button floirs-button--icon" 
+            type="button" 
+            title="Refresh"
+          >
+            <RefreshCw size={18} />
+          </button>
         </div>
       </header>
-
-      <div className="source-strip">
-        {sources.map((source) => (
-          <button
-            className={source.metadata.sourceId === selectedSourceId ? "source-tab active" : "source-tab"}
-            key={source.metadata.sourceId}
-            onClick={() => selectSource(source.metadata.sourceId)}
-          >
-            {source.metadata.displayName}
-          </button>
-        ))}
-        {sources.length === 0 && !catalogQuery.isLoading ? (
-          <button className="source-tab active">No sources</button>
-        ) : null}
-      </div>
-
-      {activeSource ? (
-        <div className="explorer-status-line">
-          <span>{activeSource.metadata.displayName}</span>
-          <strong>{titles.length} loaded</strong>
-          {titlesQuery.hasNextPage ? <em>Lazy loading enabled</em> : <em>End of source results</em>}
-        </div>
-      ) : null}
 
       {isInitialLoading ? <LoadingPanel label="Loading explorer" /> : null}
       {hasError ? <EmptyPanel label={errorMessage} /> : null}
@@ -1314,81 +1315,162 @@ function ExplorerDetailsPage() {
     }
     if (!sourceResult) return <EmptyPanel label="Series not found" />;
 
-    return (
-      <section className="page">
-        <button className="inline-back" onClick={() => navigate("/explorer")}>
-          <ArrowLeft size={16} />
-          Back to Explorer
-        </button>
+    const detailBanner = sourceResult.details.coverUrl ?? null;
+    const detailReadableCount = sourceResult.chapters.filter((chapter) => chapter.availability === "readable").length;
 
-        <div className="details-layout">
-          <SourceCover imageUrl={sourceResult.details.coverUrl} title={sourceResult.details.name} />
-          <div className="details-main">
-            <p className="eyebrow">{sourceResult.details.sourceLabel ?? sourceId}</p>
-            <h1>{sourceResult.details.name}</h1>
-            <p className="muted">{sourceResult.details.originalLanguage ?? "Unknown original type"}</p>
-            <p className="description">{sourceResult.details.description ?? "No description available."}</p>
-            <div className="tag-row">
-              {sourceResult.details.tags.map((genre) => (
-                <span key={genre}>{genre}</span>
-              ))}
-            </div>
-            <div className="details-actions">
+    return (
+      <div className="page" style={{ padding: 0 }}>
+        <section className="series-detail">
+          <div
+            className="series-detail__banner"
+            style={
+              detailBanner
+                ? {
+                    position: 'fixed',
+                    top: '-50px',
+                    left: '-50px',
+                    right: '-50px',
+                    bottom: '-50px',
+                    backgroundImage: `linear-gradient(180deg, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.85)), url(${detailBanner})`,
+                    backgroundPosition: 'center',
+                    backgroundSize: 'cover',
+                    filter: 'blur(30px)',
+                    opacity: 0.4,
+                    zIndex: 0,
+                    pointerEvents: 'none'
+                  }
+                : { display: 'none' }
+            }
+          />
+          <div className="series-detail__hero" style={{ background: 'transparent' }}>
+            <div className="series-detail__backbar">
               <button
-                className="button primary"
-                disabled={addSourceProjectMutation.isPending}
-                onClick={() => addSourceProjectMutation.mutate()}
+                type="button"
+                className="floirs-button"
+                title="Back"
+                onClick={() => navigate("/explorer")}
               >
-                <Plus size={16} />
-                {addSourceProjectMutation.isPending ? "Adding" : "Add to Library"}
+                <ArrowLeft size={16} />
+                <span>Back</span>
               </button>
-              <a className="button secondary" href={sourceResult.details.canonicalUrl} target="_blank" rel="noreferrer">
-                <Compass size={16} />
-                Open source
-              </a>
             </div>
-            {addSourceProjectMutation.isError ? (
-              <p className="error-line">
-                {addSourceProjectMutation.error instanceof Error
-                  ? addSourceProjectMutation.error.message
-                  : "Could not add series to library"}
+  
+        </div>
+
+        <div className="series-detail__header">
+          <div className="series-detail__cover-panel">
+            {sourceResult.details.coverUrl ? (
+              <img className="series-detail__cover" src={sourceResult.details.coverUrl} alt={sourceResult.details.name} />
+            ) : (
+              <div className="series-detail__cover series-detail__cover--empty">No cover</div>
+            )}
+          </div>
+
+          <div className="series-detail__title-block">
+            <div className="series-detail__title-row">
+              <h1 className="series-detail__title">{sourceResult.details.name}</h1>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
+              {sourceResult.details.tags.length ? (
+                <div className="series-detail__tags" style={{ margin: 0, flex: 1 }}>
+                  {sourceResult.details.tags.map((tag) => (
+                    <span className="series-detail__tag" key={tag}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              ) : <div style={{ flex: 1 }} />}
+            </div>
+
+            <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <a
+                href={sourceResult.details.canonicalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="floirs-button floirs-button--icon"
+                title="Open source page"
+              >
+                <Compass size={16} />
+              </a>
+              <button
+                type="button"
+                className="floirs-button"
+                onClick={() => addSourceProjectMutation.mutate()}
+                disabled={addSourceProjectMutation.isPending}
+                style={{ fontSize: '0.85rem', padding: '0.5rem 1.5rem' }}
+              >
+                {addSourceProjectMutation.isPending ? "Adding..." : "Add to Library"}
+              </button>
+            </div>
+            <div className="series-detail__meta-cards">
+              <div className="series-detail__meta-card">
+                <span className="series-detail__meta-label">Source</span>
+                <strong>{sourceResult.details.sourceLabel ?? sourceId}</strong>
+              </div>
+              <div className="series-detail__meta-card">
+                <span className="series-detail__meta-label">Status</span>
+                <strong>{sourceResult.details.statusLabel ?? sourceResult.details.status}</strong>
+              </div>
+              <div className="series-detail__meta-card">
+                <span className="series-detail__meta-label">Original Language</span>
+                <strong>{sourceResult.details.originalLanguage ?? "Unknown"}</strong>
+              </div>
+            </div>
+
+            <div className="series-detail__summary-box">
+              <p className="series-detail__summary" dir="rtl">
+                {sourceResult.details.description || "لا يوجد وصف."}
               </p>
-            ) : null}
-            {prepareChapterMutation.isError ? (
-              <p className="error-line">
-                {prepareChapterMutation.error instanceof Error
-                  ? prepareChapterMutation.error.message
-                  : "Could not download chapter"}
-              </p>
-            ) : null}
+            </div>
           </div>
         </div>
 
-        <div className="table-card">
-          <div className="table-title">
-            <h2>Chapters</h2>
-            <span>{sourceResult.chapters.length} listed</span>
-          </div>
-          <div className="chapter-list compact source-chapters">
-            {sourceResult.chapters.map((chapter) => (
-              <SourceChapterRow
-                chapter={chapter}
-                key={chapter.chapterId}
-                isDownloading={
-                  prepareChapterMutation.isPending &&
-                  prepareChapterMutation.variables === chapter.chapterId
-                }
-                onDownload={() => prepareChapterMutation.mutate(chapter.chapterId)}
-                onRead={() =>
-                  navigate(
-                    `/explorer/${encodeURIComponent(sourceId)}/${encodeURIComponent(titleId)}/chapters/${encodeURIComponent(chapter.chapterId)}/read`,
-                  )
-                }
-              />
-            ))}
+        <div style={{ maxWidth: '1152px', width: '100%', margin: '0 auto', padding: '0 2rem', position: 'relative', zIndex: 10 }}>
+          {addSourceProjectMutation.isError ? (
+            <p className="error-line">
+              {addSourceProjectMutation.error instanceof Error
+                ? addSourceProjectMutation.error.message
+                : "Could not add series to library"}
+            </p>
+          ) : null}
+          {prepareChapterMutation.isError ? (
+            <p className="error-line">
+              {prepareChapterMutation.error instanceof Error
+                ? prepareChapterMutation.error.message
+                : "Could not download chapter"}
+            </p>
+          ) : null}
+
+          <div className="series-detail__table-wrap">
+            <div className="series-detail__table">
+              <div className="series-detail__table-head">
+                <span>TITLE</span>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', textTransform: 'none', letterSpacing: 'normal' }}>
+                </div>
+              </div>
+
+              {sourceResult.chapters.map((chapter) => (
+                <SourceChapterRow
+                  chapter={chapter}
+                  key={chapter.chapterId}
+                  isDownloading={
+                    prepareChapterMutation.isPending &&
+                    prepareChapterMutation.variables === chapter.chapterId
+                  }
+                  onDownload={() => prepareChapterMutation.mutate(chapter.chapterId)}
+                  onRead={() =>
+                    navigate(
+                      `/explorer/${encodeURIComponent(sourceId)}/${encodeURIComponent(titleId)}/chapters/${encodeURIComponent(chapter.chapterId)}/read`,
+                    )
+                  }
+                />
+              ))}
+            </div>
           </div>
         </div>
       </section>
+      </div>
     );
   }
 
@@ -1416,7 +1498,7 @@ function ExplorerDetailsPage() {
             ))}
           </div>
           <div className="details-actions">
-            <button className="button primary">
+            <button className="floirs-button">
               <Plus size={16} />
               Add to Library
             </button>
@@ -1443,6 +1525,27 @@ function ExplorerDetailsPage() {
   );
 }
 
+function formatReleaseDate(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  const now = new Date();
+  const diffTime = now.getTime() - parsed.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays > 0 && diffDays < 7) return `${diffDays} days ago`;
+
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(parsed);
+}
+
 function SourceChapterRow({
   chapter,
   isDownloading,
@@ -1458,37 +1561,38 @@ function SourceChapterRow({
 
   return (
     <div
-      className={isReadable ? "chapter-row chapter-row-button source-chapter-row" : "chapter-row chapter-row-button source-chapter-row is-disabled"}
-      role="button"
-      tabIndex={isReadable ? 0 : -1}
+      className="series-detail__table-row"
       onClick={() => {
         if (isReadable) onRead();
       }}
-      onKeyDown={(event) => {
-        if (!isReadable) return;
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onRead();
-        }
-      }}
     >
-      <strong>{chapter.chapterNumber == null ? "Chapter" : `Chapter ${chapter.chapterNumber}`}</strong>
-      <span>{chapter.title || "Untitled"}</span>
-      <span className={`status-chip ${statusClass(chapter.availability)}`}>
-        {chapter.availabilityLabel ?? chapter.availability}
-      </span>
-      <button
-        className="icon-button source-download-button"
-        disabled={!isReadable || isDownloading}
-        onClick={(event) => {
-          event.stopPropagation();
-          onDownload();
-        }}
-        title="Download chapter for translation"
-        type="button"
-      >
-        {isDownloading ? <RefreshCw className="spin" size={15} /> : <Download size={15} />}
-      </button>
+      <div className="series-detail__cell series-detail__cell--title" title={chapter.title || "Untitled"}>
+        <span className="series-detail__title-text">
+          {chapter.chapterNumber == null ? "Chapter" : `Chapter ${chapter.chapterNumber}`} - {chapter.title || "Untitled"}
+        </span>
+        {chapter.availability !== "readable" && (
+          <span className={`series-detail__chapter-badge series-detail__chapter-badge--${chapter.availability}`}>
+            {chapter.availabilityLabel ?? chapter.availability}
+          </span>
+        )}
+      </div>
+      <div className="series-detail__cell series-detail__cell--actions">
+        <span className="series-detail__cell--date">{formatReleaseDate(chapter.releaseDate)}</span>
+        <div className="series-detail__row-actions">
+          <button
+            className="floirs-button floirs-button--icon source-download-button"
+            disabled={!isReadable || isDownloading}
+            onClick={(event) => {
+              event.stopPropagation();
+              onDownload();
+            }}
+            title="Download chapter for translation"
+            type="button"
+          >
+            {isDownloading ? <RefreshCw className="spin" size={15} /> : <Download size={15} />}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1669,7 +1773,7 @@ function ChaptersTab({ projectId }: { projectId: string }) {
           <span>{rows.length} chapters</span>
         </div>
         <button
-          className="button primary"
+          className="floirs-button"
           type="button"
           onClick={() => setIsCreateChapterOpen(true)}
         >
@@ -1757,7 +1861,7 @@ function CreateChapterDialog({
             <p className="eyebrow">Library</p>
             <h2>Add chapter</h2>
           </div>
-          <button className="icon-button" onClick={onClose} type="button" title="Close">
+          <button className="floirs-button floirs-button--icon" onClick={onClose} type="button" title="Close">
             <X size={16} />
           </button>
         </div>
@@ -1784,7 +1888,7 @@ function CreateChapterDialog({
           <div className="form-field full">
             <span>Page images</span>
             <div className="chapter-image-picker">
-              <button className="button secondary" type="button" onClick={onChooseImages}>
+              <button className="floirs-button" type="button" onClick={onChooseImages}>
                 <ImageIcon size={16} />
                 Choose images
               </button>
@@ -1805,10 +1909,10 @@ function CreateChapterDialog({
         {error ? <p className="error-line">{error}</p> : null}
 
         <div className="form-actions end">
-          <button className="button secondary" type="button" onClick={onClose} disabled={isSaving}>
+          <button className="floirs-button" type="button" onClick={onClose} disabled={isSaving}>
             Cancel
           </button>
-          <button className="button primary" type="submit" disabled={!canSubmit}>
+          <button className="floirs-button" type="submit" disabled={!canSubmit}>
             {isSaving ? "Creating" : "Create chapter"}
           </button>
         </div>
@@ -2065,13 +2169,15 @@ function DictionaryTab({ projectId }: { projectId: string }) {
       </div>
 
       <div className="dictionary-toolbar">
-        <div className="search-box">
-          <Search size={16} />
+        <div className="floirs-search-shell">
           <input
+            className="floirs-search-input"
+            type="search"
             value={searchValue}
             onChange={(event) => setSearchValue(event.target.value)}
             placeholder={section === "characters" ? "Search characters" : "Search terms"}
           />
+          <Search size={16} />
         </div>
         {section === "characters" ? (
           <select
@@ -2102,7 +2208,7 @@ function DictionaryTab({ projectId }: { projectId: string }) {
         <div className="table-card">
           <div className="table-title">
             <h2>Characters</h2>
-            <button className="button secondary" onClick={openAddCharacter}>
+            <button className="floirs-button" onClick={openAddCharacter}>
               <Plus size={16} />
               Add character
             </button>
@@ -2159,7 +2265,7 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                   <strong>Aliases</strong>
                   <button
                     type="button"
-                    className="button secondary"
+                    className="floirs-button"
                     onClick={() =>
                       setCharacterForm({
                         ...characterForm,
@@ -2199,7 +2305,7 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                     />
                     <button
                       type="button"
-                      className="icon-button"
+                      className="floirs-button floirs-button--icon"
                       title="Remove alias"
                       onClick={() =>
                         setCharacterForm({
@@ -2217,12 +2323,12 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                 <p className="error-line">{(characterMutationError as Error).message}</p>
               ) : null}
               <div className="form-actions">
-                <button className="button primary" disabled={isCharacterSaving} type="submit">
+                <button className="floirs-button" disabled={isCharacterSaving} type="submit">
                   <Save size={16} />
                   {editingCharacterId ? "Save character" : "Create character"}
                 </button>
                 <button
-                  className="button secondary"
+                  className="floirs-button"
                   type="button"
                   onClick={() => {
                     setCharacterForm(null);
@@ -2253,7 +2359,7 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                 </span>
                 <span>{character.description ?? "No description"}</span>
                 <div className="row-actions">
-                  <button className="icon-button" title="Edit character" onClick={() => openEditCharacter(character)}>
+                  <button className="floirs-button floirs-button--icon" title="Edit character" onClick={() => openEditCharacter(character)}>
                     <Edit3 size={15} />
                   </button>
                   <button
@@ -2277,7 +2383,7 @@ function DictionaryTab({ projectId }: { projectId: string }) {
         <div className="table-card">
           <div className="table-title">
             <h2>General Glossary</h2>
-            <button className="button secondary" onClick={openAddTerm}>
+            <button className="floirs-button" onClick={openAddTerm}>
               <Plus size={16} />
               Add term
             </button>
@@ -2334,12 +2440,12 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                 <p className="error-line">{(termMutationError as Error).message}</p>
               ) : null}
               <div className="form-actions">
-                <button className="button primary" disabled={isTermSaving} type="submit">
+                <button className="floirs-button" disabled={isTermSaving} type="submit">
                   <Save size={16} />
                   {editingTermId ? "Save term" : "Create term"}
                 </button>
                 <button
-                  className="button secondary"
+                  className="floirs-button"
                   type="button"
                   onClick={() => {
                     setTermForm(null);
@@ -2371,7 +2477,7 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                 <span>{term.category}</span>
                 <span>{term.description ?? "No description"}</span>
                 <div className="row-actions">
-                  <button className="icon-button" title="Edit term" onClick={() => openEditTerm(term)}>
+                  <button className="floirs-button floirs-button--icon" title="Edit term" onClick={() => openEditTerm(term)}>
                     <Edit3 size={15} />
                   </button>
                   <button
@@ -3265,7 +3371,7 @@ function TranslationPage() {
       tabIndex={-1}
     >
       <header className="translation-topbar">
-        <button className="icon-button" onClick={() => navigate(`/projects/${projectId}`)} title="Back">
+        <button className="floirs-button floirs-button--icon" onClick={() => navigate(`/projects/${projectId}`)} title="Back">
           <ArrowLeft size={18} />
         </button>
         <div>
@@ -3304,7 +3410,7 @@ function TranslationPage() {
             Replace
           </label>
           <button
-            className="button secondary"
+            className="floirs-button"
             disabled={isOcrRunning || !selectedProvider?.available}
             onClick={runCurrentPageOcr}
           >
@@ -3321,17 +3427,17 @@ function TranslationPage() {
             Select text
           </button>
           <button
-            className="button secondary"
+            className="floirs-button"
             disabled={isOcrRunning || !selectedProvider?.available}
             onClick={runWholeChapterOcr}
           >
             <Layers3 size={15} />
             Chapter OCR
           </button>
-          <button className="button secondary"><Sparkles size={15} />AI Translate</button>
-          <button className="button secondary"><Languages size={15} />Microsoft</button>
-          <button className="button secondary"><ShieldCheck size={15} />Quality</button>
-          <button className="button primary"><Download size={15} />Export</button>
+          <button className="floirs-button"><Sparkles size={15} />AI Translate</button>
+          <button className="floirs-button"><Languages size={15} />Microsoft</button>
+          <button className="floirs-button"><ShieldCheck size={15} />Quality</button>
+          <button className="floirs-button"><Download size={15} />Export</button>
         </div>
       </header>
 
@@ -3372,11 +3478,11 @@ function TranslationPage() {
         <main className="page-viewer-panel">
           <div className="page-viewer-toolbar">
             <div className="page-switcher">
-              <button className="icon-button" onClick={() => setZoom(zoom - 0.08)} title="Zoom out">
+              <button className="floirs-button floirs-button--icon" onClick={() => setZoom(zoom - 0.08)} title="Zoom out">
                 <ZoomOut size={16} />
               </button>
               <span>{Math.round(zoom * 100)}%</span>
-              <button className="icon-button" onClick={() => setZoom(zoom + 0.08)} title="Zoom in">
+              <button className="floirs-button floirs-button--icon" onClick={() => setZoom(zoom + 0.08)} title="Zoom in">
                 <ZoomIn size={16} />
               </button>
             </div>
@@ -3610,7 +3716,7 @@ function TranslationPage() {
               <span>All text</span>
               <div className="text-size-buttons">
                 <button
-                  className="icon-button"
+                  className="floirs-button floirs-button--icon"
                   disabled={updateChapterTextSizeMutation.isPending || workspace.textUnits.length === 0}
                   onClick={() => adjustAllTextFontSizes(-TEXT_UNIT_FONT_STEP)}
                   title="Decrease all text"
@@ -3619,7 +3725,7 @@ function TranslationPage() {
                   <ZoomOut size={15} />
                 </button>
                 <button
-                  className="icon-button"
+                  className="floirs-button floirs-button--icon"
                   disabled={updateChapterTextSizeMutation.isPending || workspace.textUnits.length === 0}
                   onClick={() => adjustAllTextFontSizes(TEXT_UNIT_FONT_STEP)}
                   title="Increase all text"
@@ -3633,7 +3739,7 @@ function TranslationPage() {
               <span>Selected</span>
               <div className="font-size-row">
                 <button
-                  className="icon-button"
+                  className="floirs-button floirs-button--icon"
                   disabled={!selectedTextUnit || updateTextUnitTypesettingMutation.isPending}
                   onClick={() => adjustSelectedTextFontSize(-TEXT_UNIT_FONT_STEP)}
                   title="Decrease selected text"
@@ -3652,7 +3758,7 @@ function TranslationPage() {
                   value={selectedTextUnit ? selectedFontSize : ""}
                 />
                 <button
-                  className="icon-button"
+                  className="floirs-button floirs-button--icon"
                   disabled={!selectedTextUnit || updateTextUnitTypesettingMutation.isPending}
                   onClick={() => adjustSelectedTextFontSize(TEXT_UNIT_FONT_STEP)}
                   title="Increase selected text"
@@ -3757,14 +3863,14 @@ function MiniDictionary({
         <h2>Mini Dictionary</h2>
         <div>
           <Link
-            className="icon-button"
+            className="floirs-button floirs-button--icon"
             title="Open characters dictionary"
             to={`/projects/${projectId}?tab=dictionary&section=characters`}
           >
             <Plus size={15} />
           </Link>
           <Link
-            className="icon-button"
+            className="floirs-button floirs-button--icon"
             title="Open glossary dictionary"
             to={`/projects/${projectId}?tab=dictionary&section=glossary`}
           >
@@ -3883,7 +3989,7 @@ function TextUnitCard({
           ))}
         </select>
         <button
-          className="button secondary"
+          className="floirs-button"
           type="button"
           onClick={() => {
             setSourceStatus("Reviewed");
