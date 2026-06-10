@@ -25,47 +25,86 @@ def filter_text_components(mask, crop_width, crop_height):
         x, y, width, height, area = stats[label]
         if area < 3:
             continue
-        if area > crop_area * 0.16:
+
+        box_area = max(1, width * height)
+        density = area / box_area
+        touches_edge = (
+            x <= 1
+            or y <= 1
+            or x + width >= crop_width - 1
+            or y + height >= crop_height - 1
+        )
+
+        if area > crop_area * 0.32 and density < 0.22:
             continue
-        if width > crop_width * 0.92 and height > crop_height * 0.12:
+        if width > crop_width * 0.92 and height > crop_height * 0.12 and (touches_edge or density < 0.2):
             continue
-        if width > crop_width * 0.55 and height > crop_height * 0.35:
+        if width > crop_width * 0.55 and height > crop_height * 0.35 and density < 0.18:
             continue
-        if height > crop_height * 0.8 and width > crop_width * 0.18:
+        if height > crop_height * 0.8 and width > crop_width * 0.18 and (touches_edge or density < 0.2):
             continue
         filtered[labels == label] = 255
 
     return filtered
 
 
+def guarded_mask(mask, crop_width, crop_height):
+    guarded = mask.copy()
+    guard = int(clamp(round(min(crop_width, crop_height) * 0.035), 3, 24))
+    guarded[:guard, :] = 0
+    guarded[-guard:, :] = 0
+    guarded[:, :guard] = 0
+    guarded[:, -guard:] = 0
+    return guarded
+
+
+def feature_mask(gray, polarity):
+    crop_height, crop_width = gray.shape[:2]
+    blur_size = odd_kernel(max(11, min(crop_width, crop_height) // 8))
+    local_background = cv2.GaussianBlur(gray, (blur_size, blur_size), 0)
+    feature_kernel_size = odd_kernel(int(clamp(min(crop_width, crop_height) // 9, 9, 35)))
+    feature_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (feature_kernel_size, feature_kernel_size))
+
+    if polarity == "light":
+        contrast = cv2.subtract(gray, local_background)
+        adaptive = cv2.adaptiveThreshold(
+            gray,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            odd_kernel(max(21, min(crop_width, crop_height) // 5)),
+            -6,
+        )
+        top_hat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, feature_kernel)
+        contrast_mask = ((gray > 45) & (contrast > 9)).astype(np.uint8) * 255
+    else:
+        contrast = cv2.subtract(local_background, gray)
+        adaptive = cv2.adaptiveThreshold(
+            gray,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV,
+            odd_kernel(max(21, min(crop_width, crop_height) // 5)),
+            11,
+        )
+        top_hat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, feature_kernel)
+        contrast_mask = ((gray < 220) & (contrast > 9)).astype(np.uint8) * 255
+
+    _threshold, feature = cv2.threshold(top_hat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    mask = cv2.bitwise_or(cv2.bitwise_and(adaptive, contrast_mask), feature)
+    mask = guarded_mask(mask, crop_width, crop_height)
+    mask = filter_text_components(mask, crop_width, crop_height)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8), iterations=1)
+    return mask
+
+
 def build_text_mask(crop_rgb, expansion):
     crop_height, crop_width = crop_rgb.shape[:2]
     gray = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2GRAY)
 
-    blur_size = odd_kernel(max(11, min(crop_width, crop_height) // 8))
-    local_background = cv2.GaussianBlur(gray, (blur_size, blur_size), 0)
-    dark_contrast = cv2.subtract(local_background, gray)
-
-    dark_mask = ((gray < 205) & (dark_contrast > 10)).astype(np.uint8) * 255
-    adaptive = cv2.adaptiveThreshold(
-        gray,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
-        odd_kernel(max(21, min(crop_width, crop_height) // 5)),
-        11,
-    )
-    mask = cv2.bitwise_and(adaptive, dark_mask)
-
-    # Keep bubble borders and panel lines if the user selected a whole bubble.
-    guard = int(clamp(round(min(crop_width, crop_height) * 0.035), 3, 24))
-    mask[:guard, :] = 0
-    mask[-guard:, :] = 0
-    mask[:, :guard] = 0
-    mask[:, -guard:] = 0
-
-    mask = filter_text_components(mask, crop_width, crop_height)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8), iterations=1)
+    dark_mask = feature_mask(gray, "dark")
+    light_mask = feature_mask(gray, "light")
+    mask = cv2.bitwise_or(dark_mask, light_mask)
 
     if expansion > 0:
         kernel_size = max(1, int(expansion) * 2 + 1)
