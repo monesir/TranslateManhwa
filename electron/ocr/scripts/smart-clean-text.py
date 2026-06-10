@@ -113,11 +113,57 @@ def build_text_mask(crop_rgb, expansion):
     return mask
 
 
+def page_region_to_pixels(region, image_width, image_height, page_width, page_height):
+    left = int(clamp(round((float(region["x"]) / page_width) * image_width), 0, image_width - 1))
+    top = int(clamp(round((float(region["y"]) / page_height) * image_height), 0, image_height - 1))
+    right = int(
+        clamp(round(((float(region["x"]) + float(region["width"])) / page_width) * image_width), left + 1, image_width)
+    )
+    bottom = int(
+        clamp(round(((float(region["y"]) + float(region["height"])) / page_height) * image_height), top + 1, image_height)
+    )
+    return left, top, right, bottom
+
+
+def apply_existing_patches(image, patches_manifest_path, page_width, page_height):
+    if not patches_manifest_path:
+        return image
+    if not os.path.exists(patches_manifest_path):
+        return image
+
+    with open(patches_manifest_path, "r", encoding="utf-8") as manifest_file:
+        patches = json.load(manifest_file)
+
+    if not isinstance(patches, list) or len(patches) == 0:
+        return image
+
+    image_width, image_height = image.size
+    canvas = image.convert("RGBA")
+
+    for patch in patches:
+        patch_path = patch.get("path")
+        region = patch.get("region")
+        if not patch_path or not region or not os.path.exists(patch_path):
+            continue
+
+        left, top, right, bottom = page_region_to_pixels(region, image_width, image_height, page_width, page_height)
+        patch_width = max(1, right - left)
+        patch_height = max(1, bottom - top)
+
+        with Image.open(patch_path) as raw_patch:
+            patch_image = ImageOps.exif_transpose(raw_patch).convert("RGBA")
+            if patch_image.size != (patch_width, patch_height):
+                patch_image = patch_image.resize((patch_width, patch_height), Image.Resampling.LANCZOS)
+            canvas.alpha_composite(patch_image, (left, top))
+
+    return canvas.convert("RGB")
+
+
 def main():
-    if len(sys.argv) != 12:
+    if len(sys.argv) not in (12, 13):
         raise SystemExit(
             "Usage: smart-clean-text.py <source> <output> <x> <y> <width> <height> "
-            "<page_width> <page_height> <mask_expansion> <feather> <method>"
+            "<page_width> <page_height> <mask_expansion> <feather> <method> [patches_manifest]"
         )
 
     source_path = sys.argv[1]
@@ -131,15 +177,20 @@ def main():
     expansion = int(clamp(round(float(sys.argv[9])), 0, 18))
     feather = int(clamp(round(float(sys.argv[10])), 0, 16))
     method = sys.argv[11].strip().lower()
+    patches_manifest_path = sys.argv[12] if len(sys.argv) == 13 else ""
 
     with Image.open(source_path) as raw_image:
         image = ImageOps.exif_transpose(raw_image).convert("RGB")
 
     image_width, image_height = image.size
-    left = int(clamp(round((x / page_width) * image_width), 0, image_width - 1))
-    top = int(clamp(round((y / page_height) * image_height), 0, image_height - 1))
-    right = int(clamp(round(((x + region_width) / page_width) * image_width), left + 1, image_width))
-    bottom = int(clamp(round(((y + region_height) / page_height) * image_height), top + 1, image_height))
+    image = apply_existing_patches(image, patches_manifest_path, page_width, page_height)
+    left, top, right, bottom = page_region_to_pixels(
+        {"x": x, "y": y, "width": region_width, "height": region_height},
+        image_width,
+        image_height,
+        page_width,
+        page_height,
+    )
 
     crop = image.crop((left, top, right, bottom))
     crop_rgb = np.array(crop)

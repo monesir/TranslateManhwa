@@ -92,6 +92,15 @@ function mapCleanPatchRow(row) {
   };
 }
 
+async function removeIfExists(filePath) {
+  if (!filePath) return;
+  try {
+    await fsp.unlink(filePath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
+
 class PageCleanService {
   constructor(db, options = {}) {
     this.db = db;
@@ -133,6 +142,30 @@ class PageCleanService {
     };
   }
 
+  existingCleanPatches(pageId) {
+    const rows = this.db.prepare(`
+      SELECT region_json, patch_path
+      FROM page_clean_patches
+      WHERE page_id = ?
+      ORDER BY created_at ASC, id ASC
+    `).all(pageId);
+
+    return rows
+      .map((row) => {
+        try {
+          const patchPath = localPathFromPageAsset(this.workspacePath, row.patch_path);
+          if (!fs.existsSync(patchPath)) return null;
+          return {
+            path: patchPath,
+            region: JSON.parse(row.region_json),
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  }
+
   async cleanText(pageId, input) {
     const page = this.getPage(pageId);
     const region = normalizeRegion(input?.region, page);
@@ -153,28 +186,43 @@ class PageCleanService {
       .replace(/\\/g, "/");
     const outputPath = assertInsideWorkspace(this.workspacePath, path.join(this.workspacePath, relativePath));
     const patchUrl = pageCacheUrl(relativePath);
+    const outputDirectory = path.dirname(outputPath);
+    await fsp.mkdir(outputDirectory, { recursive: true });
 
-    const { stdout } = await execFileAsync(
-      this.pythonCommand,
-      [
-        SMART_CLEAN_SCRIPT,
-        page.imagePath,
-        outputPath,
-        String(region.x),
-        String(region.y),
-        String(region.width),
-        String(region.height),
-        String(page.width),
-        String(page.height),
-        String(maskExpansion),
-        String(feather),
-        method,
-      ],
-      {
-        maxBuffer: 1024 * 1024,
-        windowsHide: true,
-      },
-    );
+    const existingPatches = this.existingCleanPatches(page.pageId);
+    const manifestPath = existingPatches.length > 0 ? `${outputPath}.patches.json` : "";
+    if (manifestPath) {
+      await fsp.writeFile(manifestPath, JSON.stringify(existingPatches), "utf8");
+    }
+
+    let stdout = "";
+    try {
+      const result = await execFileAsync(
+        this.pythonCommand,
+        [
+          SMART_CLEAN_SCRIPT,
+          page.imagePath,
+          outputPath,
+          String(region.x),
+          String(region.y),
+          String(region.width),
+          String(region.height),
+          String(page.width),
+          String(page.height),
+          String(maskExpansion),
+          String(feather),
+          method,
+          ...(manifestPath ? [manifestPath] : []),
+        ],
+        {
+          maxBuffer: 1024 * 1024,
+          windowsHide: true,
+        },
+      );
+      stdout = result.stdout;
+    } finally {
+      await removeIfExists(manifestPath);
+    }
 
     let metadata = {};
     try {
@@ -182,6 +230,7 @@ class PageCleanService {
     } catch {
       metadata = {};
     }
+    metadata.existingPatchCount = existingPatches.length;
 
     await fsp.stat(outputPath);
 
