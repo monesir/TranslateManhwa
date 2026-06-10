@@ -2773,7 +2773,8 @@ function TranslationPage() {
   const syncPaneScroll = (sourceName: "edit" | "original") => {
     const source = sourceName === "original" ? originalPaneScrollRef.current : editPaneScrollRef.current;
     const target = sourceName === "original" ? editPaneScrollRef.current : originalPaneScrollRef.current;
-    if (!source || !target || scrollSyncRef.current) return;
+    if (!source || !target) return;
+    if (scrollSyncRef.current && scrollSyncRef.current !== sourceName) return;
 
     scrollSyncRef.current = sourceName;
 
@@ -2807,58 +2808,19 @@ function TranslationPage() {
       return bestPage;
     };
 
+    target.scrollTop = clampScroll(source.scrollTop, Math.max(0, target.scrollHeight - target.clientHeight));
+    target.scrollLeft = clampScroll(source.scrollLeft, Math.max(0, target.scrollWidth - target.clientWidth));
+
     const sourcePage = visiblePage(source);
-    const targetPages = pageElements(target);
-    const targetPage =
-      targetPages.find((pageElement) => pageElement.dataset.pageId === sourcePage?.dataset.pageId) ??
-      targetPages[0];
-
-    if (!sourcePage || !targetPage) {
-      const sourceMaxTop = Math.max(1, source.scrollHeight - source.clientHeight);
-      const sourceMaxLeft = Math.max(1, source.scrollWidth - source.clientWidth);
-      target.scrollTo({
-        left: (source.scrollLeft / sourceMaxLeft) * Math.max(0, target.scrollWidth - target.clientWidth),
-        top: (source.scrollTop / sourceMaxTop) * Math.max(0, target.scrollHeight - target.clientHeight),
-      });
-      window.requestAnimationFrame(() => {
-        scrollSyncRef.current = null;
-      });
-      return;
-    }
-
-    const sourceCenter = paneCenter(source);
-    const targetRect = target.getBoundingClientRect();
-    const sourcePageRect = sourcePage.getBoundingClientRect();
-    const targetPageRect = targetPage.getBoundingClientRect();
-    const relativeX = Math.max(
-      0,
-      Math.min(1, (sourceCenter.x - sourcePageRect.left) / Math.max(1, sourcePageRect.width)),
-    );
-    const relativeY = Math.max(
-      0,
-      Math.min(1, (sourceCenter.y - sourcePageRect.top) / Math.max(1, sourcePageRect.height)),
-    );
-    const targetPointX = targetPageRect.left + targetPageRect.width * relativeX;
-    const targetPointY = targetPageRect.top + targetPageRect.height * relativeY;
-
-    target.scrollTo({
-      left: clampScroll(
-        target.scrollLeft + targetPointX - (targetRect.left + target.clientWidth / 2),
-        Math.max(0, target.scrollWidth - target.clientWidth),
-      ),
-      top: clampScroll(
-        target.scrollTop + targetPointY - (targetRect.top + target.clientHeight / 2),
-        Math.max(0, target.scrollHeight - target.clientHeight),
-      ),
-    });
-
-    const sourcePageId = sourcePage.dataset.pageId;
+    const sourcePageId = sourcePage?.dataset.pageId;
     if (viewerMode === "webtoon" && sourcePageId && sourcePageId !== selectedPageId) {
       setSelectedPageId(sourcePageId);
     }
 
     window.requestAnimationFrame(() => {
-      scrollSyncRef.current = null;
+      if (scrollSyncRef.current === sourceName) {
+        scrollSyncRef.current = null;
+      }
     });
   };
   const setSelectedTextFontSize = (fontSize: number) => {
