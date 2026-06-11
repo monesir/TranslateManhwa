@@ -457,6 +457,22 @@ export interface PageCleanTextInput {
   policy?: CleanPolicy;
 }
 
+export interface RestoreCleanPatchAreaInput {
+  feather?: number;
+  patchRegion?: RegionBox;
+  region: RegionBox;
+}
+
+export interface RestoreCleanPatchAreaResult {
+  changedPixels: number;
+  chapterId: string;
+  deleted: boolean;
+  markId: string;
+  pageId: string;
+  patch?: PageEditMark;
+  restoredRegion: RegionBox;
+}
+
 export type CleanProviderId =
   | "algorithm"
   | "bubble_fill"
@@ -563,6 +579,7 @@ export type ActiveTool =
   | "color-picker"
   | "clean"
   | "restore-clean"
+  | "restore-area"
   | "translate"
   | "review"
   | "typeset"

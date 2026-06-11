@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld("florisApi", {
   deletePageEditMark: invoke("data:deletePageEditMark"),
   samplePageColor: invoke("data:samplePageColor"),
   cleanPageText: invoke("data:cleanPageText"),
+  restoreCleanPatchArea: invoke("data:restoreCleanPatchArea"),
   translateWithMicrosoft: invoke("translation:microsoft"),
   mergeChapterPages: invoke("pages:mergeChapter"),
   removeMergedPages: invoke("pages:removeMerged"),

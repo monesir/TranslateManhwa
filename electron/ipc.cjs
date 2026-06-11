@@ -53,6 +53,8 @@ function registerIpcHandlers(appApi) {
       appApi.samplePageColor(pageId, input),
     "data:cleanPageText": (_event, pageId, input) =>
       appApi.cleanPageText(pageId, input),
+    "data:restoreCleanPatchArea": (_event, markId, input) =>
+      appApi.restoreCleanPatchArea(markId, input),
     "translation:microsoft": (_event, input) =>
       appApi.translateWithMicrosoft(input),
     "pages:mergeChapter": (_event, chapterId, input) =>

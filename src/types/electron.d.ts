@@ -22,6 +22,8 @@ import type {
   Project,
   ProjectOverview,
   RemoveMergedPagesResult,
+  RestoreCleanPatchAreaInput,
+  RestoreCleanPatchAreaResult,
   ChapterTextSizeInput,
   DeleteOcrResultsInput,
   DeleteOcrResultsResult,
@@ -78,6 +80,10 @@ interface FlorisApi {
   deletePageEditMark(markId: string): Promise<{ chapterId: string; id: string; pageId: string }>;
   samplePageColor(pageId: string, input: PageColorSampleInput): Promise<PageColorSampleResult>;
   cleanPageText(pageId: string, input: PageCleanTextInput): Promise<PageEditMark>;
+  restoreCleanPatchArea(
+    markId: string,
+    input: RestoreCleanPatchAreaInput,
+  ): Promise<RestoreCleanPatchAreaResult>;
   translateWithMicrosoft(input: TranslateTextUnitsInput): Promise<TranslateTextUnitsResult>;
   mergeChapterPages(chapterId: string, input: MergeChapterPagesInput): Promise<MergeChapterPagesResult>;
   removeMergedPages(chapterId: string): Promise<RemoveMergedPagesResult>;

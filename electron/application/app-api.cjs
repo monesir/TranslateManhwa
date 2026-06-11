@@ -102,6 +102,10 @@ function createAppApi(db, options = {}) {
       return pageCleanService.cleanText(pageId, input);
     },
 
+    restoreCleanPatchArea(markId, input) {
+      return pageCleanService.restorePatchArea(markId, input);
+    },
+
     translateWithMicrosoft(input) {
       return translationService.translateMicrosoft(input);
     },

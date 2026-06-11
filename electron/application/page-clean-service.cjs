@@ -8,6 +8,7 @@ const { COVER_CACHE_SCHEME, sanitizeFilePart } = require("../data/cover-cache.cj
 
 const execFileAsync = promisify(execFile);
 const SMART_CLEAN_SCRIPT = path.join(__dirname, "..", "ocr", "scripts", "smart-clean-text.py");
+const RESTORE_CLEAN_PATCH_SCRIPT = path.join(__dirname, "..", "ocr", "scripts", "restore-clean-patch.py");
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const DEFAULT_LAMA_PYTHON = path.join(REPO_ROOT, ".venv-lama", "Scripts", "python.exe");
 
@@ -159,6 +160,54 @@ function normalizeRegion(region, page) {
   };
 }
 
+function normalizeFreeRegion(region, fallback = null) {
+  const raw = region && typeof region === "object" ? region : fallback;
+  if (!raw || typeof raw !== "object") return null;
+  const x = Number(raw.x);
+  const y = Number(raw.y);
+  const width = Number(raw.width);
+  const height = Number(raw.height);
+  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+  return {
+    type: "box",
+    x: roundCoordinate(x),
+    y: roundCoordinate(y),
+    width: roundCoordinate(width),
+    height: roundCoordinate(height),
+  };
+}
+
+function intersectRegions(first, second) {
+  if (!first || !second) return null;
+  const left = Math.max(first.x, second.x);
+  const top = Math.max(first.y, second.y);
+  const right = Math.min(first.x + first.width, second.x + second.width);
+  const bottom = Math.min(first.y + first.height, second.y + second.height);
+  if (right <= left || bottom <= top) return null;
+  return {
+    type: "box",
+    x: roundCoordinate(left),
+    y: roundCoordinate(top),
+    width: roundCoordinate(right - left),
+    height: roundCoordinate(bottom - top),
+  };
+}
+
+function versionedPatchUrl(patchUrl, timestamp) {
+  const url = new URL(patchUrl);
+  url.searchParams.set("v", String(new Date(timestamp).getTime()));
+  return url.toString();
+}
+
+function appendRestoreMetadata(metadata, restoreEntry) {
+  const current = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {};
+  const existing = Array.isArray(current.restoreAreas) ? current.restoreAreas : [];
+  return {
+    ...current,
+    restoreAreas: [...existing.slice(-24), restoreEntry],
+  };
+}
+
 function mapCleanPatchRow(row) {
   const metadata = safeJson(row.metadata_json, undefined);
   return {
@@ -178,6 +227,8 @@ function mapCleanPatchRow(row) {
     opacity: Number(row.opacity ?? 1),
     patchUrl: row.patch_path,
     region: JSON.parse(row.region_json),
+    sourceOcrRunId: row.source_ocr_run_id ?? undefined,
+    sourceTextUnitId: row.source_text_unit_id ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -255,6 +306,21 @@ class PageCleanService {
         }
       })
       .filter(Boolean);
+  }
+
+  getCleanPatchRow(markId) {
+    const row = this.db.prepare(`
+      SELECT
+        cp.*,
+        c.project_id
+      FROM page_clean_patches cp
+      JOIN chapters c ON c.id = cp.chapter_id
+      WHERE cp.id = ?
+    `).get(String(markId ?? ""));
+
+    if (!row) throw new Error("Clean patch was not found");
+    if (!this.workspacePath) throw new Error("Smart clean workspace path is not configured");
+    return row;
   }
 
   insertCleanAttempt({
@@ -545,6 +611,117 @@ class PageCleanService {
         updated_at: timestamp,
       }),
       metadata,
+    };
+  }
+
+  async restorePatchArea(markId, input) {
+    const row = this.getCleanPatchRow(markId);
+    const storedPatchRegion = normalizeFreeRegion(safeJson(row.region_json, null));
+    const displayPatchRegion = normalizeFreeRegion(input?.patchRegion, storedPatchRegion);
+    const restoreRegion = normalizeFreeRegion(input?.region);
+    const intersection = intersectRegions(restoreRegion, displayPatchRegion);
+    if (!storedPatchRegion || !displayPatchRegion || !restoreRegion) {
+      throw new Error("Restore area has invalid geometry");
+    }
+    if (!intersection) {
+      throw new Error("Restore area does not overlap this clean patch");
+    }
+
+    const feather = Math.round(clamp(Number(input?.feather ?? 0), 0, 12));
+    const patchPath = localPathFromPageAsset(this.workspacePath, row.patch_path);
+    if (!fs.existsSync(patchPath)) {
+      throw new Error("Clean patch image file was not found on disk");
+    }
+
+    const originalPatchBytes = await fsp.readFile(patchPath);
+    let restoreMetadata = {};
+    try {
+      const result = await execFileAsync(
+        this.pythonCommand,
+        [
+          RESTORE_CLEAN_PATCH_SCRIPT,
+          patchPath,
+          String(restoreRegion.x),
+          String(restoreRegion.y),
+          String(restoreRegion.width),
+          String(restoreRegion.height),
+          String(displayPatchRegion.x),
+          String(displayPatchRegion.y),
+          String(displayPatchRegion.width),
+          String(displayPatchRegion.height),
+          String(feather),
+        ],
+        {
+          maxBuffer: 1024 * 1024,
+          windowsHide: true,
+        },
+      );
+      restoreMetadata = safeJson(String(result.stdout || "{}"), {});
+    } catch (error) {
+      await fsp.writeFile(patchPath, originalPatchBytes);
+      throw error;
+    }
+
+    const timestamp = new Date().toISOString();
+    const shouldDeletePatch = Number(restoreMetadata.remainingAlphaPixels ?? 1) <= 0;
+    const restoreEntry = {
+      at: timestamp,
+      displayPatchRegion,
+      feather,
+      intersection,
+      patchRegion: storedPatchRegion,
+      pixelRegion: restoreMetadata.pixelRegion ?? null,
+      region: restoreRegion,
+      changedPixels: Number(restoreMetadata.changedPixels ?? 0),
+    };
+
+    this.db.exec("BEGIN");
+    try {
+      if (shouldDeletePatch) {
+        this.db.prepare("DELETE FROM page_clean_patches WHERE id = ?").run(row.id);
+      } else {
+        const metadata = appendRestoreMetadata(safeJson(row.metadata_json, {}), restoreEntry);
+        metadata.lastRestoreArea = restoreEntry;
+        const patchUrl = versionedPatchUrl(row.patch_path, timestamp);
+        this.db.prepare(`
+          UPDATE page_clean_patches
+          SET patch_path = ?, metadata_json = ?, updated_at = ?
+          WHERE id = ?
+        `).run(patchUrl, JSON.stringify(metadata), timestamp, row.id);
+        row.patch_path = patchUrl;
+        row.metadata_json = JSON.stringify(metadata);
+        row.updated_at = timestamp;
+      }
+
+      this.db.prepare("UPDATE chapters SET updated_at = ? WHERE id = ?").run(timestamp, row.chapter_id);
+      this.db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(timestamp, row.project_id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      await fsp.writeFile(patchPath, originalPatchBytes);
+      throw error;
+    }
+
+    if (shouldDeletePatch) {
+      await removeIfExists(patchPath);
+      return {
+        chapterId: row.chapter_id,
+        deleted: true,
+        markId: row.id,
+        pageId: row.page_id,
+        restoredRegion: intersection,
+        changedPixels: Number(restoreMetadata.changedPixels ?? 0),
+      };
+    }
+
+    return {
+      chapterId: row.chapter_id,
+      deleted: false,
+      markId: row.id,
+      pageId: row.page_id,
+      patch: mapCleanPatchRow(row),
+      restoredRegion: intersection,
+      changedPixels: Number(restoreMetadata.changedPixels ?? 0),
     };
   }
 }

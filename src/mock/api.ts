@@ -25,6 +25,8 @@ import type {
   Project,
   ProjectOverview,
   RemoveMergedPagesResult,
+  RestoreCleanPatchAreaInput,
+  RestoreCleanPatchAreaResult,
   RegionBox,
   SourceCatalogItem,
   SourceChapterPreparationResult,
@@ -114,6 +116,19 @@ function expandMockRegion(region: RegionBox, page: Page, padding: { x: number; y
     width: Math.max(1, right - x),
     height: Math.max(1, bottom - y),
   };
+}
+
+function intersectRegions(first: RegionBox, second: RegionBox): RegionBox | null {
+  const left = Math.max(first.x, second.x);
+  const top = Math.max(first.y, second.y);
+  const right = Math.min(first.x + first.width, second.x + second.width);
+  const bottom = Math.min(first.y + first.height, second.y + second.height);
+  if (right <= left || bottom <= top) return null;
+  return { type: "box", x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function regionArea(region: RegionBox) {
+  return Math.max(0, region.width) * Math.max(0, region.height);
 }
 
 function clampBrushSize(value: number) {
@@ -931,6 +946,63 @@ export async function cleanPageText(pageId: string, input: PageCleanTextInput): 
   };
   mutablePageEditMarks = [...mutablePageEditMarks, mark];
   return delay(mark, 120);
+}
+
+export async function restoreCleanPatchArea(
+  markId: string,
+  input: RestoreCleanPatchAreaInput,
+): Promise<RestoreCleanPatchAreaResult> {
+  if (window.florisApi) return window.florisApi.restoreCleanPatchArea(markId, input);
+
+  const existing = mutablePageEditMarks.find((mark) => mark.id === markId);
+  if (!existing || existing.kind !== "clean_patch" || !existing.region) {
+    throw new Error("Clean patch was not found");
+  }
+
+  const patchRegion = input.patchRegion ?? existing.region;
+  const restoredRegion = intersectRegions(input.region, patchRegion);
+  if (!restoredRegion) throw new Error("Restore area does not overlap this clean patch");
+
+  const deleted = regionArea(restoredRegion) >= regionArea(patchRegion) * 0.98;
+  if (deleted) {
+    mutablePageEditMarks = mutablePageEditMarks.filter((mark) => mark.id !== markId);
+    return delay({
+      changedPixels: Math.round(regionArea(restoredRegion)),
+      chapterId: existing.chapterId,
+      deleted: true,
+      markId,
+      pageId: existing.pageId,
+      restoredRegion,
+    }, 80);
+  }
+
+  const timestamp = new Date().toISOString();
+  const updated: PageEditMark = {
+    ...existing,
+    metadata: {
+      ...(existing.metadata ?? {}),
+      lastRestoreArea: {
+        at: timestamp,
+        patchRegion,
+        region: input.region,
+        restoredRegion,
+      },
+    },
+    patchUrl: existing.patchUrl?.startsWith("data:")
+      ? existing.patchUrl
+      : `${existing.patchUrl ?? ""}${existing.patchUrl?.includes("?") ? "&" : "?"}v=${Date.now()}`,
+    updatedAt: timestamp,
+  };
+  mutablePageEditMarks = mutablePageEditMarks.map((mark) => (mark.id === markId ? updated : mark));
+  return delay({
+    changedPixels: Math.round(regionArea(restoredRegion)),
+    chapterId: updated.chapterId,
+    deleted: false,
+    markId,
+    pageId: updated.pageId,
+    patch: updated,
+    restoredRegion,
+  }, 80);
 }
 
 export async function addCharacter(

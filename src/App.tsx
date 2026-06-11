@@ -93,6 +93,7 @@ import {
   prepareLibraryChapter,
   prepareSourceChapter,
   removeMergedPages,
+  restoreCleanPatchArea,
   runOcrForChapter,
   runOcrForPage,
   runOcrForRegion,
@@ -134,6 +135,7 @@ import type {
   Project,
   ProjectOverview,
   RegionBox,
+  RestoreCleanPatchAreaResult,
   SourceCatalogItem,
   SourceChapterSummary,
   SourceTitleSummary,
@@ -272,6 +274,22 @@ function normalizeSelectionRegion(selection: OcrSelectionState | null): RegionBo
     y,
     width,
     height,
+  };
+}
+
+function intersectRegionBoxes(first: RegionBox | null | undefined, second: RegionBox | null | undefined): RegionBox | null {
+  if (!first || !second) return null;
+  const left = Math.max(first.x, second.x);
+  const top = Math.max(first.y, second.y);
+  const right = Math.min(first.x + first.width, second.x + second.width);
+  const bottom = Math.min(first.y + first.height, second.y + second.height);
+  if (right <= left || bottom <= top) return null;
+  return {
+    type: "box",
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
   };
 }
 
@@ -2825,6 +2843,7 @@ function TranslationPage() {
   const translationScreenRef = useRef<HTMLElement | null>(null);
   const ocrSelectionRef = useRef<OcrSelectionState | null>(null);
   const cleanSelectionRef = useRef<OcrSelectionState | null>(null);
+  const restoreAreaSelectionRef = useRef<OcrSelectionState | null>(null);
   const [viewerMode, setViewerMode] = useState<"page" | "webtoon">("page");
   const [mergePages, setMergePages] = useState(false);
   const [originalPanePercent, setOriginalPanePercent] = useState(44);
@@ -2837,6 +2856,7 @@ function TranslationPage() {
   const [autoCleanMaskExpansion, setAutoCleanMaskExpansion] = useState(6);
   const [ocrSelection, setOcrSelection] = useState<OcrSelectionState | null>(null);
   const [cleanSelection, setCleanSelection] = useState<OcrSelectionState | null>(null);
+  const [restoreAreaSelection, setRestoreAreaSelection] = useState<OcrSelectionState | null>(null);
   const [textBoxDraft, setTextBoxDraft] = useState<TextBoxDraftState | null>(null);
   const [drawStroke, setDrawStroke] = useState<DrawStrokeState | null>(null);
   const [brushColor, setBrushColor] = useState(DEFAULT_BRUSH_COLOR);
@@ -2972,6 +2992,43 @@ function TranslationPage() {
       queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
       queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+  });
+  const restoreCleanPatchAreaMutation = useMutation({
+    mutationFn: async ({
+      marks,
+      region,
+    }: {
+      marks: PageEditMark[];
+      region: RegionBox;
+    }) => {
+      const results: RestoreCleanPatchAreaResult[] = [];
+      for (const mark of marks) {
+        if (!mark.region) continue;
+        results.push(await restoreCleanPatchArea(mark.id, {
+          feather: 0,
+          patchRegion: mark.region,
+          region,
+        }));
+      }
+      return {
+        chapterId: results[0]?.chapterId ?? chapterId ?? "",
+        results,
+      };
+    },
+    onSuccess: ({ chapterId: restoredChapterId, results }) => {
+      restoreAreaSelectionRef.current = null;
+      setRestoreAreaSelection(null);
+      const deletedCount = results.filter((result) => result.deleted).length;
+      setCleanStatus(`Restored area in ${results.length} patch${results.length === 1 ? "" : "es"}${deletedCount ? `, removed ${deletedCount}` : ""}`);
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", restoredChapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+    onError: (error) => {
+      restoreAreaSelectionRef.current = null;
+      setRestoreAreaSelection(null);
+      setCleanStatus(error instanceof Error ? error.message : "Restore area failed");
     },
   });
   const cleanPageTextMutation = useMutation({
@@ -3128,6 +3185,13 @@ function TranslationPage() {
       setOcrSelection(null);
     }
   }, [ocrSelection, workspace?.pages]);
+
+  useEffect(() => {
+    if (restoreAreaSelection && !workspace?.pages.some((page) => page.id === restoreAreaSelection.pageId)) {
+      restoreAreaSelectionRef.current = null;
+      setRestoreAreaSelection(null);
+    }
+  }, [restoreAreaSelection, workspace?.pages]);
 
   if (workspaceQuery.isLoading) return <LoadingPanel label="Loading translation workspace" />;
   if (!workspace) return <EmptyPanel label="Chapter not found" />;
@@ -3392,6 +3456,10 @@ function TranslationPage() {
       beginCleanSelection(event, page);
       return;
     }
+    if (activeTool === "restore-area") {
+      beginRestoreAreaSelection(event, page);
+      return;
+    }
     if (activeTool !== "draw" || event.button !== 0 || addPageEditMarkMutation.isPending) return;
     event.preventDefault();
     event.stopPropagation();
@@ -3410,6 +3478,10 @@ function TranslationPage() {
       moveCleanSelection(event, page);
       return;
     }
+    if (activeTool === "restore-area") {
+      moveRestoreAreaSelection(event, page);
+      return;
+    }
     const current = drawStrokeRef.current;
     if (activeTool !== "draw" || !current || current.pageId !== page.id) return;
     event.preventDefault();
@@ -3418,6 +3490,10 @@ function TranslationPage() {
   const endDrawing = (event: PointerEvent<SVGSVGElement>, page: Page) => {
     if (activeTool === "clean") {
       endCleanSelection(event, page);
+      return;
+    }
+    if (activeTool === "restore-area") {
+      endRestoreAreaSelection(event, page);
       return;
     }
     const current = drawStrokeRef.current;
@@ -3448,6 +3524,22 @@ function TranslationPage() {
     event.stopPropagation();
     if (activeTool !== "restore-clean" || deletePageEditMarkMutation.isPending || !isAutoCleanPatch(mark)) return;
     deletePageEditMarkMutation.mutate(mark.id);
+  };
+  const runRestoreAreaSelection = (selection: OcrSelectionState) => {
+    const region = normalizeSelectionRegion(selection);
+    if (!region || restoreCleanPatchAreaMutation.isPending) return;
+    const pageMarks = editMarksByPage.get(selection.pageId) ?? [];
+    const targets = pageMarks.filter((mark) =>
+      isAutoCleanPatch(mark) && Boolean(intersectRegionBoxes(region, mark.region)),
+    );
+    if (targets.length === 0) {
+      restoreAreaSelectionRef.current = null;
+      setRestoreAreaSelection(null);
+      setCleanStatus("No auto-clean patch in selected area");
+      return;
+    }
+    setCleanStatus("Restoring selected area...");
+    restoreCleanPatchAreaMutation.mutate({ marks: targets, region });
   };
   const runCleanSelection = (selection: OcrSelectionState) => {
     const region = normalizeSelectionRegion(selection);
@@ -3480,6 +3572,7 @@ function TranslationPage() {
   };
   const selectedOcrRegion = normalizeSelectionRegion(ocrSelection);
   const selectedCleanRegion = normalizeSelectionRegion(cleanSelection);
+  const selectedRestoreAreaRegion = normalizeSelectionRegion(restoreAreaSelection);
   const selectedProvider = ocrProvidersQuery.data?.find((provider) => provider.id === ocrProviderId);
   const isOcrRunning =
     runPageOcrMutation.isPending || runRegionOcrMutation.isPending || runChapterOcrMutation.isPending;
@@ -3626,6 +3719,15 @@ function TranslationPage() {
       translationScreenRef.current?.focus({ preventScroll: true });
     });
   };
+  const startRestoreAreaSelection = () => {
+    restoreAreaSelectionRef.current = null;
+    setRestoreAreaSelection(null);
+    setCleanStatus("");
+    setActiveTool("restore-area");
+    window.requestAnimationFrame(() => {
+      translationScreenRef.current?.focus({ preventScroll: true });
+    });
+  };
   const beginCleanSelection = (event: PointerEvent<SVGSVGElement>, page: Page) => {
     if (activeTool !== "clean" || cleanPageTextMutation.isPending || event.button !== 0) return;
     event.preventDefault();
@@ -3670,6 +3772,51 @@ function TranslationPage() {
     cleanSelectionRef.current = finalSelection;
     setCleanSelection(finalSelection);
     if (shouldRun) runCleanSelection(finalSelection);
+  };
+  const beginRestoreAreaSelection = (event: PointerEvent<SVGSVGElement>, page: Page) => {
+    if (activeTool !== "restore-area" || restoreCleanPatchAreaMutation.isPending || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = pointFromSvg(event, page);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const selection = {
+      pageId: page.id,
+      startX: point.x,
+      startY: point.y,
+      currentX: point.x,
+      currentY: point.y,
+    };
+    restoreAreaSelectionRef.current = selection;
+    setSelectedPageId(page.id);
+    setRestoreAreaSelection(selection);
+  };
+  const moveRestoreAreaSelection = (event: PointerEvent<SVGSVGElement>, page: Page) => {
+    const currentSelection = restoreAreaSelectionRef.current;
+    if (activeTool !== "restore-area" || !currentSelection || currentSelection.pageId !== page.id) return;
+    event.preventDefault();
+    const point = pointFromSvg(event, page);
+    const nextSelection = { ...currentSelection, currentX: point.x, currentY: point.y };
+    restoreAreaSelectionRef.current = nextSelection;
+    setRestoreAreaSelection(nextSelection);
+  };
+  const endRestoreAreaSelection = (event: PointerEvent<SVGSVGElement>, page: Page, shouldRun = true) => {
+    const currentSelection = restoreAreaSelectionRef.current;
+    if (activeTool !== "restore-area" || !currentSelection || currentSelection.pageId !== page.id) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    const point = pointFromSvg(event, page);
+    const finalSelection = { ...currentSelection, currentX: point.x, currentY: point.y };
+    if (!normalizeSelectionRegion(finalSelection)) {
+      restoreAreaSelectionRef.current = null;
+      setRestoreAreaSelection(null);
+      return;
+    }
+    restoreAreaSelectionRef.current = finalSelection;
+    setRestoreAreaSelection(finalSelection);
+    if (shouldRun) runRestoreAreaSelection(finalSelection);
   };
   const updatePageSplit = (clientX: number) => {
     const bounds = splitStageRef.current?.getBoundingClientRect();
@@ -3779,15 +3926,21 @@ function TranslationPage() {
               ? "edit-drawing-layer is-cleaning"
               : activeTool === "restore-clean"
                 ? "edit-drawing-layer is-restoring-clean"
-                : "edit-drawing-layer"
+                : activeTool === "restore-area"
+                  ? "edit-drawing-layer is-restoring-area"
+                  : "edit-drawing-layer"
       }
       viewBox={`0 0 ${page.width} ${page.height}`}
-      onPointerCancel={(event) => endDrawing(event, page)}
+      onPointerCancel={(event) => {
+        if (activeTool === "clean") endCleanSelection(event, page, false);
+        else if (activeTool === "restore-area") endRestoreAreaSelection(event, page, false);
+        else endDrawing(event, page);
+      }}
       onPointerDown={(event) => beginDrawing(event, page)}
       onPointerMove={(event) => moveDrawing(event, page)}
       onPointerUp={(event) => endDrawing(event, page)}
     >
-      {activeTool === "draw" || activeTool === "color-picker" || activeTool === "clean" ? (
+      {activeTool === "draw" || activeTool === "color-picker" || activeTool === "clean" || activeTool === "restore-area" ? (
         <rect className="page-pointer-hitbox" x={0} y={0} width={page.width} height={page.height} />
       ) : null}
       {marks.map((mark) => renderEditMark(mark))}
@@ -3798,6 +3951,16 @@ function TranslationPage() {
           y={selectedCleanRegion.y}
           width={selectedCleanRegion.width}
           height={selectedCleanRegion.height}
+          rx={10}
+        />
+      ) : null}
+      {restoreAreaSelection?.pageId === page.id && selectedRestoreAreaRegion ? (
+        <rect
+          className="restore-area-selection-region"
+          x={selectedRestoreAreaRegion.x}
+          y={selectedRestoreAreaRegion.y}
+          width={selectedRestoreAreaRegion.width}
+          height={selectedRestoreAreaRegion.height}
           rx={10}
         />
       ) : null}
@@ -3910,7 +4073,7 @@ function TranslationPage() {
     >
       {renderPageArtwork(page)}
       {renderDrawingLayer(page, marks)}
-      <div className={activeTool === "draw" || activeTool === "color-picker" || activeTool === "clean" || activeTool === "restore-clean" ? "edit-work-layer is-passive" : "edit-work-layer"}>
+      <div className={activeTool === "draw" || activeTool === "color-picker" || activeTool === "clean" || activeTool === "restore-clean" || activeTool === "restore-area" ? "edit-work-layer is-passive" : "edit-work-layer"}>
         {units.map((unit) => {
           const label = unit.finalTranslation || unit.microsoftTranslation || unit.aiTranslation || unit.sourceText;
           const isSelected = unit.id === selectedTextUnit?.id;
@@ -4369,6 +4532,7 @@ function TranslationPage() {
               ["color-picker", Pipette],
               ["clean", Eraser],
               ["restore-clean", RefreshCw],
+              ["restore-area", Highlighter],
               ["typeset", Type],
             ]}
             activeTool={activeTool}
@@ -4449,7 +4613,16 @@ function TranslationPage() {
               type="button"
             >
               <RefreshCw size={15} />
-              Restore Clean
+              Restore Patch
+            </button>
+            <button
+              className={activeTool === "restore-area" ? "button secondary full-width active-command" : "button secondary full-width"}
+              disabled={restoreCleanPatchAreaMutation.isPending}
+              onClick={startRestoreAreaSelection}
+              type="button"
+            >
+              <Highlighter size={15} />
+              Restore Area
             </button>
             <label className="clean-control">
               <span>Cleaner</span>

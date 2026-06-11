@@ -1964,7 +1964,8 @@ h3 {
 .edit-drawing-layer.is-drawing,
 .edit-drawing-layer.is-color-picking,
 .edit-drawing-layer.is-cleaning,
-.edit-drawing-layer.is-restoring-clean {
+.edit-drawing-layer.is-restoring-clean,
+.edit-drawing-layer.is-restoring-area {
   pointer-events: auto;
 }
 
@@ -1982,6 +1983,10 @@ h3 {
 
 .edit-drawing-layer.is-restoring-clean {
   cursor: pointer;
+}
+
+.edit-drawing-layer.is-restoring-area {
+  cursor: crosshair;
 }
 
 .page-pointer-hitbox {
@@ -2004,6 +2009,14 @@ h3 {
 .restore-clean-target:hover {
   fill: rgba(217, 96, 65, 0.18);
   stroke: #ff9a76;
+}
+
+.restore-area-selection-region {
+  fill: rgba(92, 173, 255, 0.13);
+  stroke: #74b9ff;
+  stroke-dasharray: 12 8;
+  stroke-width: 4;
+  pointer-events: none;
 }
 
 .edit-mark-path.preview {
