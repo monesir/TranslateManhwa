@@ -266,6 +266,8 @@ export interface Page {
   imageUrl: string | null;
   width: number;
   height: number;
+  pageKind?: "original" | "merged";
+  mergedGroupId?: string | null;
 }
 
 export interface RegionBox {
@@ -287,13 +289,21 @@ export interface PageEditMark {
   pageId: string;
   kind: "brush" | "clean_patch";
   color?: string;
+  classification?: CleanClassificationKind;
+  cleanMode?: CleanPatchMode;
+  cleanProvider?: CleanProviderId | string;
+  cleanSource?: CleanPatchSource;
+  confidence?: number | null;
   feather?: number;
   maskExpansion?: number;
   method?: "telea" | "ns";
+  metadata?: Record<string, unknown>;
   opacity: number;
   patchUrl?: string;
   points?: PageEditPoint[];
   region?: RegionBox;
+  sourceOcrRunId?: string | null;
+  sourceTextUnitId?: string | null;
   size?: number;
   createdAt: string;
   updatedAt: string;
@@ -329,6 +339,9 @@ export interface TextUnit {
   matchedCharacterIds: string[];
   matchedGlossaryTermIds: string[];
   typesetting: TextUnitTypesetting;
+  cleanStatus?: CleanAttemptStatus;
+  cleanClassification?: CleanClassificationKind;
+  cleanReason?: string;
 }
 
 export interface ChapterTranslationWorkspace {
@@ -369,6 +382,11 @@ export interface OcrRunOptions {
   providerId: OcrProviderId;
   languageHint?: string;
   replaceExisting?: boolean;
+  autoCleanText?: boolean;
+  autoCleanPolicy?: CleanPolicy;
+  autoCleanProvider?: CleanProviderId;
+  autoCleanMaskExpansion?: number;
+  autoCleanFeather?: number;
 }
 
 export interface OcrRegionExpansion {
@@ -387,6 +405,9 @@ export interface OcrRunResult {
   averageConfidence: number | null;
   candidatesCreated: number;
   chapterId: string;
+  cleanErrors?: string[];
+  cleanPatchesCreated?: number;
+  cleanSkipped?: number;
   languageDetected?: string | null;
   pagesProcessed: number;
   provider: OcrProviderId | string;
@@ -427,6 +448,111 @@ export interface PageCleanTextInput {
   maskExpansion: number;
   method: "telea" | "ns";
   region: RegionBox;
+  maskRegion?: RegionBox;
+  mode?: CleanPatchMode;
+  provider?: CleanProviderId;
+  source?: CleanPatchSource;
+  sourceTextUnitId?: string;
+  sourceOcrRunId?: string;
+  policy?: CleanPolicy;
+}
+
+export type CleanProviderId =
+  | "algorithm"
+  | "bubble_fill"
+  | "free_text_inpaint"
+  | "opencv_telea"
+  | "opencv_ns"
+  | "lama"
+  | "diffusion";
+
+export type CleanPolicy =
+  | "off"
+  | "safe_bubbles_only"
+  | "ask_on_unsafe"
+  | "force_all_regions";
+
+export type CleanClassificationKind =
+  | "white_bubble"
+  | "black_bubble"
+  | "flat_light_box"
+  | "flat_dark_box"
+  | "textured_background"
+  | "effect_text"
+  | "unknown"
+  | "unsafe";
+
+export type CleanAttemptStatus = "applied" | "failed" | "skipped" | "pending";
+
+export type CleanPatchMode = "auto_after_ocr" | "manual_selection" | "retry";
+
+export type CleanPatchSource =
+  | "ocr_page"
+  | "ocr_region"
+  | "ocr_chapter"
+  | "manual_clean";
+
+export interface CleanRegionClassification {
+  kind: CleanClassificationKind;
+  confidence: number;
+  metrics: Record<string, number>;
+  reason: string;
+}
+
+export interface DeleteOcrResultsInput {
+  chapterId: string;
+  includeAutoCleanPatches?: boolean;
+  keepManualEdits?: boolean;
+  pageId?: string;
+}
+
+export interface DeleteOcrResultsResult {
+  chapterId: string;
+  pageId?: string;
+  textUnitsDeleted: number;
+  candidatesDeleted: number;
+  translationCandidatesDeleted: number;
+  autoCleanPatchesDeleted: number;
+  manualEditsKept: number;
+}
+
+export interface TranslateTextUnitsInput {
+  scope: "text_unit" | "page" | "chapter";
+  textUnitId?: string;
+  pageId?: string;
+  chapterId: string;
+  provider?: "microsoft";
+  sourceLanguage?: string;
+  targetLanguage?: string;
+}
+
+export interface TranslateTextUnitsResult {
+  chapterId: string;
+  provider: "microsoft" | string;
+  runId: string;
+  status: "completed" | "failed";
+  translatedCount: number;
+  failedCount: number;
+  errorMessage?: string;
+}
+
+export interface MergeChapterPagesInput {
+  direction?: "vertical" | "horizontal";
+  pairSize?: number;
+  replaceExisting?: boolean;
+}
+
+export interface MergeChapterPagesResult {
+  chapterId: string;
+  direction: "vertical" | "horizontal";
+  mergedPagesCreated: number;
+  sourcePagesUsed: number;
+}
+
+export interface RemoveMergedPagesResult {
+  chapterId: string;
+  mergedPagesDeleted: number;
+  assetsDeleted: number;
 }
 
 export type ActiveTool =
@@ -436,6 +562,7 @@ export type ActiveTool =
   | "draw"
   | "color-picker"
   | "clean"
+  | "restore-clean"
   | "translate"
   | "review"
   | "typeset"

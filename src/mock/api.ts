@@ -10,6 +10,8 @@ import type {
   ExplorerSeriesDetails,
   GlossaryTerm,
   LibraryStats,
+  MergeChapterPagesInput,
+  MergeChapterPagesResult,
   OcrProviderStatus,
   OcrRegionRunOptions,
   OcrRunOptions,
@@ -22,6 +24,7 @@ import type {
   PageEditMarkInput,
   Project,
   ProjectOverview,
+  RemoveMergedPagesResult,
   RegionBox,
   SourceCatalogItem,
   SourceChapterPreparationResult,
@@ -32,6 +35,10 @@ import type {
   SourceTitleSummary,
   TextUnit,
   TextUnitTypesettingInput,
+  TranslateTextUnitsInput,
+  TranslateTextUnitsResult,
+  DeleteOcrResultsInput,
+  DeleteOcrResultsResult,
   UpdateTextUnitSourceInput,
   ChapterTextSizeInput,
 } from "../types/domain";
@@ -93,6 +100,20 @@ function clampTextBox(box: RegionBox | undefined, fallback: RegionBox, page?: Pa
   const x = Math.max(0, Math.min(Number(source.x) || 0, pageWidth - width));
   const y = Math.max(0, Math.min(Number(source.y) || 0, pageHeight - height));
   return { type: "box", x, y, width, height };
+}
+
+function expandMockRegion(region: RegionBox, page: Page, padding: { x: number; y: number }): RegionBox {
+  const x = Math.max(0, region.x - padding.x);
+  const y = Math.max(0, region.y - padding.y);
+  const right = Math.min(page.width, region.x + region.width + padding.x);
+  const bottom = Math.min(page.height, region.y + region.height + padding.y);
+  return {
+    type: "box",
+    x,
+    y,
+    width: Math.max(1, right - x),
+    height: Math.max(1, bottom - y),
+  };
 }
 
 function clampBrushSize(value: number) {
@@ -335,10 +356,16 @@ export async function getChapterForTranslation(
   const project = mutableProjects.find((item) => item.id === chapter.projectId);
   if (!project) return delay(undefined);
 
+  const allChapterPages = mutablePages.filter((page) => page.chapterId === chapterId);
+  const hasMergedPages = allChapterPages.some((page) => page.pageKind === "merged");
+  const chapterPages = allChapterPages.filter((page) =>
+    hasMergedPages ? page.pageKind === "merged" : (page.pageKind ?? "original") === "original",
+  );
+
   return delay({
     project,
     chapter,
-    pages: mutablePages.filter((page) => page.chapterId === chapterId),
+    pages: chapterPages,
     pageEditMarks: mutablePageEditMarks.filter((mark) => mark.chapterId === chapterId),
     textUnits: mutableTextUnits.filter((unit) => unit.chapterId === chapterId),
     characters: mutableCharacters.filter((character) => character.projectId === project.id),
@@ -462,6 +489,21 @@ export async function runOcrForPage(
     typesetting: { box: region, fontSize: 18 },
   };
   mutableTextUnits = [...mutableTextUnits, unit];
+  let cleanPatchesCreated = 0;
+  if (input.autoCleanText) {
+    await cleanPageText(pageId, {
+      feather: 2,
+      maskExpansion: input.autoCleanMaskExpansion ?? 6,
+      method: "telea",
+      mode: "auto_after_ocr",
+      policy: input.autoCleanPolicy ?? "safe_bubbles_only",
+      provider: input.autoCleanProvider ?? "bubble_fill",
+      region: expandMockRegion(region, page, { x: 6, y: 4 }),
+      source: "ocr_page",
+      sourceTextUnitId: unit.id,
+    });
+    cleanPatchesCreated = 1;
+  }
   mutableChapters = mutableChapters.map((chapter) =>
     chapter.id === page.chapterId
       ? { ...chapter, internalStatus: "OCR Done", textUnitsCount: chapter.textUnitsCount + 1, updatedAt: timestamp }
@@ -471,6 +513,7 @@ export async function runOcrForPage(
     averageConfidence: 0.85,
     candidatesCreated: 1,
     chapterId: page.chapterId,
+    cleanPatchesCreated,
     languageDetected: input.languageHint ?? null,
     pagesProcessed: 1,
     provider: input.providerId,
@@ -523,6 +566,21 @@ export async function runOcrForRegion(
     typesetting: { box: region, fontSize: 18 },
   };
   mutableTextUnits = [...mutableTextUnits, unit];
+  let cleanPatchesCreated = 0;
+  if (input.autoCleanText) {
+    await cleanPageText(pageId, {
+      feather: 2,
+      maskExpansion: input.autoCleanMaskExpansion ?? 6,
+      method: "telea",
+      mode: "auto_after_ocr",
+      policy: input.autoCleanPolicy ?? "safe_bubbles_only",
+      provider: input.autoCleanProvider ?? "bubble_fill",
+      region: expandMockRegion(region, page, { x: 6, y: 4 }),
+      source: "ocr_region",
+      sourceTextUnitId: unit.id,
+    });
+    cleanPatchesCreated = 1;
+  }
   mutableChapters = mutableChapters.map((chapter) =>
     chapter.id === page.chapterId
       ? { ...chapter, internalStatus: "OCR Done", textUnitsCount: chapter.textUnitsCount + 1, updatedAt: timestamp }
@@ -533,6 +591,7 @@ export async function runOcrForRegion(
     averageConfidence: 0.87,
     candidatesCreated: 1,
     chapterId: page.chapterId,
+    cleanPatchesCreated,
     languageDetected: input.languageHint ?? null,
     pagesProcessed: 1,
     provider: input.providerId,
@@ -550,15 +609,18 @@ export async function runOcrForChapter(
 
   const chapterPages = mutablePages.filter((page) => page.chapterId === chapterId);
   if (chapterPages.length === 0) throw new Error("Chapter has no pages");
+  let cleanPatchesCreated = 0;
   let created = 0;
   for (const page of chapterPages) {
     const result = await runOcrForPage(page.id, { ...input, replaceExisting: input.replaceExisting });
+    cleanPatchesCreated += result.cleanPatchesCreated ?? 0;
     created += result.textUnitsCreated;
   }
   return delay({
     averageConfidence: 0.85,
     candidatesCreated: created,
     chapterId,
+    cleanPatchesCreated,
     languageDetected: input.languageHint ?? null,
     pagesProcessed: chapterPages.length,
     provider: input.providerId,
@@ -601,6 +663,123 @@ export async function updateFinalTranslation(textUnitId: string, text: string): 
 
   mutableTextUnits = mutableTextUnits.map((unit) => (unit.id === textUnitId ? updated : unit));
   return delay(updated, 80);
+}
+
+export async function translateWithMicrosoft(input: TranslateTextUnitsInput): Promise<TranslateTextUnitsResult> {
+  if (window.florisApi) return window.florisApi.translateWithMicrosoft(input);
+
+  const chapterId = input.chapterId;
+  const runId = `translation_run_mock_${Date.now()}`;
+  const scopedUnits = mutableTextUnits.filter((unit) => {
+    if (unit.chapterId !== chapterId) return false;
+    if (input.scope === "text_unit") return unit.id === input.textUnitId;
+    if (input.scope === "page") return unit.pageId === input.pageId;
+    return true;
+  });
+  let translatedCount = 0;
+  mutableTextUnits = mutableTextUnits.map((unit) => {
+    if (!scopedUnits.some((item) => item.id === unit.id)) return unit;
+    translatedCount += 1;
+    return {
+      ...unit,
+      microsoftTranslation: `[Microsoft] ${unit.sourceText}`,
+    };
+  });
+  return delay({
+    chapterId,
+    failedCount: 0,
+    provider: "microsoft",
+    runId,
+    status: "completed",
+    translatedCount,
+  }, 180);
+}
+
+export async function deleteOcrResults(input: DeleteOcrResultsInput): Promise<DeleteOcrResultsResult> {
+  if (window.florisApi) return window.florisApi.deleteOcrResults(input);
+
+  const targetUnits = mutableTextUnits.filter((unit) =>
+    unit.chapterId === input.chapterId && (!input.pageId || unit.pageId === input.pageId),
+  );
+  const targetIds = new Set(targetUnits.map((unit) => unit.id));
+  mutableTextUnits = mutableTextUnits.filter((unit) => !targetIds.has(unit.id));
+  let autoCleanPatchesDeleted = 0;
+  if (input.includeAutoCleanPatches !== false) {
+    const before = mutablePageEditMarks.length;
+    mutablePageEditMarks = mutablePageEditMarks.filter((mark) =>
+      !(
+        mark.chapterId === input.chapterId &&
+        (!input.pageId || mark.pageId === input.pageId) &&
+        mark.cleanMode === "auto_after_ocr"
+      ),
+    );
+    autoCleanPatchesDeleted = before - mutablePageEditMarks.length;
+  }
+
+  return delay({
+    autoCleanPatchesDeleted,
+    candidatesDeleted: targetUnits.length,
+    chapterId: input.chapterId,
+    manualEditsKept: mutablePageEditMarks.filter((mark) => mark.chapterId === input.chapterId).length,
+    pageId: input.pageId,
+    textUnitsDeleted: targetUnits.length,
+    translationCandidatesDeleted: targetUnits.length,
+  }, 120);
+}
+
+export async function mergeChapterPages(
+  chapterId: string,
+  input: MergeChapterPagesInput,
+): Promise<MergeChapterPagesResult> {
+  if (window.florisApi) return window.florisApi.mergeChapterPages(chapterId, input);
+
+  if (input.replaceExisting !== false) {
+    mutablePages = mutablePages.filter((page) => !(page.chapterId === chapterId && page.pageKind === "merged"));
+  }
+  const originals = mutablePages
+    .filter((page) => page.chapterId === chapterId && (page.pageKind ?? "original") === "original")
+    .sort((first, second) => first.index - second.index);
+  const direction = input.direction ?? "vertical";
+  const created: Page[] = [];
+  for (let index = 0; index < originals.length; index += 2) {
+    const pair = originals.slice(index, index + 2);
+    const width = direction === "horizontal"
+      ? pair.reduce((sum, page) => sum + page.width, 0)
+      : Math.max(...pair.map((page) => page.width));
+    const height = direction === "horizontal"
+      ? Math.max(...pair.map((page) => page.height))
+      : pair.reduce((sum, page) => sum + page.height, 0);
+    created.push({
+      chapterId,
+      height,
+      id: `mock_merged_${chapterId}_${index}`,
+      imageTone: pair[0]?.imageTone ?? "night",
+      imageUrl: pair[0]?.imageUrl ?? null,
+      index: created.length + 1,
+      mergedGroupId: `mock_merge_${chapterId}`,
+      pageKind: "merged",
+      width,
+    });
+  }
+  mutablePages = [...mutablePages, ...created];
+  return delay({
+    chapterId,
+    direction,
+    mergedPagesCreated: created.length,
+    sourcePagesUsed: originals.length,
+  }, 160);
+}
+
+export async function removeMergedPages(chapterId: string): Promise<RemoveMergedPagesResult> {
+  if (window.florisApi) return window.florisApi.removeMergedPages(chapterId);
+
+  const before = mutablePages.length;
+  mutablePages = mutablePages.filter((page) => !(page.chapterId === chapterId && page.pageKind === "merged"));
+  return delay({
+    assetsDeleted: before - mutablePages.length,
+    chapterId,
+    mergedPagesDeleted: before - mutablePages.length,
+  }, 120);
 }
 
 export async function deleteTextUnit(textUnitId: string): Promise<{ chapterId: string; id: string }> {
@@ -728,13 +907,20 @@ export async function cleanPageText(pageId: string, input: PageCleanTextInput): 
   const page = mutablePages.find((item) => item.id === pageId);
   if (!page) throw new Error("Page not found");
   const timestamp = new Date().toISOString();
+  const effectiveProvider = input.provider === "algorithm" ? "free_text_inpaint" : input.provider;
   const mark: PageEditMark = {
     id: `page_clean_${Date.now()}_${Math.random().toString(16).slice(2)}`,
     chapterId: page.chapterId,
     pageId: page.id,
     kind: "clean_patch",
+    classification: input.provider === "free_text_inpaint" || input.provider === "lama" ? "textured_background" : "white_bubble",
+    cleanMode: input.mode,
+    cleanProvider: input.provider,
+    cleanSource: input.source,
+    confidence: 0.92,
     feather: input.feather,
     maskExpansion: input.maskExpansion,
+    metadata: input.provider === "algorithm" ? { effectiveProvider, requestedProvider: input.provider } : undefined,
     method: input.method,
     opacity: 1,
     patchUrl:

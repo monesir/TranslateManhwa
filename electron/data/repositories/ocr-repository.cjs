@@ -120,12 +120,19 @@ class OcrRepository {
   }
 
   listChapterPagesForOcr(chapterId) {
+    const mergedCount = Number(this.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM pages
+      WHERE chapter_id = ? AND page_kind = 'merged'
+    `).get(chapterId)?.count ?? 0);
+    const pageKind = mergedCount > 0 ? "merged" : "original";
     const rows = this.db.prepare(`
       SELECT p.id
       FROM pages p
       WHERE p.chapter_id = ?
+        AND COALESCE(p.page_kind, 'original') = ?
       ORDER BY p.page_index ASC
-    `).all(chapterId);
+    `).all(chapterId, pageKind);
     return rows.map((row) => this.getPageForOcr(row.id));
   }
 
@@ -245,7 +252,12 @@ class OcrRepository {
         timestamp,
       );
 
-      inserted.push(unitId);
+      inserted.push({
+        id: unitId,
+        pageId: page.pageId,
+        region,
+        text: item.text,
+      });
     });
 
     return inserted;
@@ -253,6 +265,7 @@ class OcrRepository {
 
   applyRecognition({ languageDetected, pageResults, provider, replaceExisting, run }) {
     let candidatesCreated = 0;
+    const createdTextUnits = [];
     let textUnitsCreated = 0;
 
     this.db.exec("BEGIN");
@@ -277,6 +290,10 @@ class OcrRepository {
           startingOrder: orderOffset,
         });
         orderOffset += insertedIds.length;
+        createdTextUnits.push(...insertedIds.map((item) => ({
+          ...item,
+          page: pageResult.page,
+        })));
         candidatesCreated += pageResult.items.length;
         textUnitsCreated += insertedIds.length;
       }
@@ -315,6 +332,7 @@ class OcrRepository {
         provider,
         runId: run.id,
         status: "completed",
+        createdTextUnits,
         textUnitsCreated,
       };
     } catch (error) {

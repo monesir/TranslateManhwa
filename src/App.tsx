@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  ArrowUpDown,
   BookOpen,
   Bot,
   CheckCircle2,
@@ -72,6 +73,7 @@ import {
   createProject,
   deleteCharacter,
   deleteGlossaryTerm,
+  deleteOcrResults,
   deletePageEditMark,
   deleteTextUnit,
   ensureSourceProject,
@@ -86,9 +88,11 @@ import {
   listProjectChapters,
   listProjects,
   listSourceCatalog,
+  mergeChapterPages,
   pickChapterImages,
   prepareLibraryChapter,
   prepareSourceChapter,
+  removeMergedPages,
   runOcrForChapter,
   runOcrForPage,
   runOcrForRegion,
@@ -100,6 +104,7 @@ import {
   updateGlossaryTerm,
   updateTextUnitSource,
   updateTextUnitTypesetting,
+  translateWithMicrosoft,
 } from "./mock/api";
 import type {
   ActiveTool,
@@ -108,20 +113,24 @@ import type {
   Character,
   CharacterAliasInput,
   CharacterInput,
+  CleanProviderId,
   CreateChapterInput,
   CreateProjectInput,
   Gender,
   GlossaryTermInput,
   GlossaryTerm,
+  CleanPolicy,
   OcrRegionExpansion,
   OcrRegionRunOptions,
   OcrProviderId,
+  OcrRunResult,
   OcrRunOptions,
   OcrSourceStatus,
   Page,
   PageEditMark,
   PageEditMarkInput,
   PageEditPoint,
+  PageCleanTextInput,
   Project,
   ProjectOverview,
   RegionBox,
@@ -133,13 +142,16 @@ import type {
 } from "./types/domain";
 import { useTranslationWorkspaceStore } from "./stores/translation-workspace-store";
 
-function formatDate(value: string) {
+function formatDate(value: string | undefined | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (isNaN(date.getTime())) return "-";
   return new Intl.DateTimeFormat("en", {
     month: "short",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function statusClass(status: string) {
@@ -162,6 +174,27 @@ const sourceStatusOptions: OcrSourceStatus[] = [
   "Ignored",
   "Empty",
 ];
+
+function isAutoCleanPatch(mark: PageEditMark) {
+  if (mark.kind !== "clean_patch") return false;
+  return (
+    mark.cleanMode === "auto_after_ocr" ||
+    mark.cleanSource === "ocr_page" ||
+    mark.cleanSource === "ocr_region" ||
+    mark.cleanSource === "ocr_chapter" ||
+    Boolean(mark.sourceOcrRunId)
+  );
+}
+
+function ocrResultStatus(result: OcrRunResult) {
+  const cleanPatches = result.cleanPatchesCreated ?? 0;
+  const cleanSkipped = result.cleanSkipped ?? 0;
+  const cleanErrors = result.cleanErrors?.length ? `, ${result.cleanErrors.length} clean errors` : "";
+  if (cleanPatches > 0 || cleanSkipped > 0 || cleanErrors) {
+    return `OCR created ${result.textUnitsCreated} text units. Auto-clean applied ${cleanPatches}, skipped ${cleanSkipped}${cleanErrors}.`;
+  }
+  return `OCR created ${result.textUnitsCreated} text units.`;
+}
 
 interface CharacterFormState {
   englishName: string;
@@ -1199,23 +1232,49 @@ function ExplorerPage() {
   return (
     <section className="page">
       <header className="page-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <div className="floirs-search-shell">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ position: 'relative', width: '300px' }}>
+            <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#888' }} />
             <input
-              className="floirs-search-input"
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search series"
+              style={{ 
+                width: '100%', 
+                padding: '8px 12px 8px 36px', 
+                borderRadius: '6px', 
+                border: '1px solid #333', 
+                backgroundColor: '#1a1a1a', 
+                color: '#fff',
+                fontSize: '0.9rem',
+                outline: 'none',
+                transition: 'border-color 0.2s'
+              }}
+              onFocus={(e) => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)'}
+              onBlur={(e) => e.currentTarget.style.borderColor = '#333'}
             />
-            <Search size={16} />
           </div>
           <button 
-            className="floirs-button floirs-button--icon" 
+            className="button" 
             type="button" 
             title="Refresh"
+            style={{ 
+              height: '36px', 
+              width: '36px', 
+              padding: 0, 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              backgroundColor: '#1a1a1a', 
+              border: '1px solid #333', 
+              color: '#ddd',
+              transition: 'border-color 0.2s'
+            }}
+            onMouseOver={(e) => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)'}
+            onMouseOut={(e) => e.currentTarget.style.borderColor = '#333'}
           >
-            <RefreshCw size={18} />
+            <RefreshCw size={16} />
           </button>
         </div>
       </header>
@@ -1618,6 +1677,94 @@ function SourceChapterRow({
   );
 }
 
+function RightSidebar({ overview, projectId }: { overview: any; projectId: string }) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [activeSortOrder, setActiveSortOrder] = useState<"asc" | "desc">("desc");
+  const chaptersQuery = useQuery({
+    queryKey: ["project-chapters", projectId],
+    queryFn: () => listProjectChapters(projectId),
+  });
+
+  const prepareChapterMutation = useMutation({
+    mutationFn: (chapterId: string) => prepareLibraryChapter(chapterId),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["library-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", result.projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", result.projectId] });
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      navigate(`/projects/${result.projectId}/chapters/${result.chapterId}/translate`);
+    },
+  });
+
+  const rows = chaptersQuery.data ?? [];
+  const activeRows = rows.filter((ch: any) => ch.status === "In Progress").sort((a: any, b: any) => {
+    const dateA = new Date(a.updatedAt || 0).getTime();
+    const dateB = new Date(b.updatedAt || 0).getTime();
+    return activeSortOrder === "desc" ? dateB - dateA : dateA - dateB;
+  });
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <div style={{ background: '#161616', border: '1px solid #222', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+          <div>
+            <span style={{ color: '#888', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Chapters</span>
+            <strong style={{ display: 'block', color: '#fff', fontSize: '22px', marginTop: '6px' }}>{overview.chaptersCount}</strong>
+          </div>
+          <div>
+            <span style={{ color: '#888', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Characters</span>
+            <strong style={{ display: 'block', color: '#fff', fontSize: '22px', marginTop: '6px' }}>{overview.charactersCount}</strong>
+          </div>
+          <div>
+            <span style={{ color: '#888', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>General terms</span>
+            <strong style={{ display: 'block', color: '#fff', fontSize: '22px', marginTop: '6px' }}>{overview.generalTermsCount}</strong>
+          </div>
+          <div>
+            <span style={{ color: '#888', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Last modified</span>
+            <strong style={{ display: 'block', color: '#fff', fontSize: '15px', marginTop: '12px' }}>{formatDate(overview.lastModifiedAt)}</strong>
+          </div>
+        </div>
+      </div>
+
+      {activeRows.length > 0 && (
+        <div>
+          <h3 style={{ marginBottom: '16px', fontSize: '1.1rem', color: '#F0E6D2', fontWeight: 600 }}>Active Chapters</h3>
+          <div className="series-detail__table-wrap" style={{ border: '1px solid rgba(240, 230, 210, 0.3)', boxShadow: '0 0 20px rgba(240, 230, 210, 0.05)' }}>
+            <div className="series-detail__table">
+              <div className="series-detail__table-head" style={{ borderBottomColor: 'rgba(240, 230, 210, 0.2)', position: 'relative' }}>
+                <span>TITLE</span>
+                <span style={{ textAlign: 'right' }}>LAST MODIFIED</span>
+                <button
+                  type="button"
+                  onClick={() => setActiveSortOrder(prev => prev === "desc" ? "asc" : "desc")}
+                  title={activeSortOrder === "desc" ? "Oldest first" : "Newest first"}
+                  style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#F0E6D2', transition: 'color 0.2s' }}
+                >
+                  <ArrowUpDown size={14} />
+                </button>
+              </div>
+              {activeRows.map((chapter: any) => (
+                <ChapterRow
+                  key={chapter.id}
+                  chapter={chapter}
+                  isPreparing={
+                    prepareChapterMutation.isPending &&
+                    prepareChapterMutation.variables === chapter.id
+                  }
+                  isSubTable={true}
+                  onOpen={() => prepareChapterMutation.mutate(chapter.id)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProjectPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
@@ -1651,80 +1798,74 @@ function ProjectPage() {
 
   return (
     <section className="page">
+      <div style={{ maxWidth: '1400px', width: '100%', margin: '0 auto' }}>
       <button className="inline-back" onClick={() => navigate("/library")}>
         <ArrowLeft size={16} />
         Back to Library
       </button>
 
-      <header className="project-hero">
+      <header className="project-hero" style={{ gridTemplateColumns: '138px minmax(0, 1fr) auto', alignItems: 'stretch' }}>
         <SourceCover imageUrl={overview.coverUrl} title={overview.title} />
-        <div>
-          <p className="eyebrow">{overview.sourceLanguage} to {overview.targetLanguage}</p>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
           <h1>{overview.title}</h1>
-          <p className="muted">{overview.originalTitle}</p>
-          <div className="tag-row">
+          <div className="tag-row" style={{ marginBottom: '16px', marginTop: '8px' }}>
             {overview.genres.map((genre) => (
               <span key={genre}>{genre}</span>
             ))}
           </div>
+          <div style={{ background: '#161616', border: '1px solid #222', borderRadius: '12px', padding: '20px', marginTop: 'auto', maxWidth: '800px', position: 'relative' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <h2 style={{ fontSize: '11px', textTransform: 'uppercase', color: '#888', margin: 0, letterSpacing: '0.5px' }}>Context for AI</h2>
+              <button className="edit-context-btn" title="Edit Context">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                </svg>
+              </button>
+            </div>
+            <p style={{ fontSize: '14px', lineHeight: 1.6, margin: 0, color: '#ccc' }}>
+              {overview.contextSummary || "No work context provided."}
+            </p>
+          </div>
         </div>
       </header>
 
-      <div className="tabs">
-        <button className={tab === "chapters" ? "active" : ""} onClick={() => selectTab("chapters")}>
-          Chapters
-        </button>
-        <button className={tab === "dictionary" ? "active" : ""} onClick={() => selectTab("dictionary")}>
-          Dictionary
-        </button>
-        <button className={tab === "overview" ? "active" : ""} onClick={() => selectTab("overview")}>
-          Overview
-        </button>
+      <div style={{ display: 'grid', gridTemplateColumns: '7fr 3fr', gap: '32px', alignItems: 'start' }}>
+        <div className="left-column">
+          <div className="page-switcher" style={{ display: 'flex', width: '100%', marginBottom: '24px' }}>
+            <button 
+              className={tab === "chapters" ? "active" : ""}
+              onClick={() => selectTab("chapters")}
+              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', height: '46px', fontSize: '1rem' }}
+            >
+              <Layers3 size={18} color={tab === "chapters" ? '#fff' : '#888'} />
+              <span>Chapters</span>
+            </button>
+            <button 
+              className={tab === "dictionary" ? "active" : ""}
+              onClick={() => selectTab("dictionary")}
+              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', height: '46px', fontSize: '1rem' }}
+            >
+              <Languages size={18} color={tab === "dictionary" ? '#fff' : '#888'} />
+              <span>Dictionary</span>
+            </button>
+          </div>
+          {tab === "chapters" ? <ChaptersTab projectId={overview.id} overview={overview} /> : null}
+          {tab === "dictionary" ? <DictionaryTab projectId={overview.id} /> : null}
+        </div>
+        <RightSidebar overview={overview} projectId={overview.id} />
       </div>
-
-      {tab === "chapters" ? <ChaptersTab projectId={overview.id} /> : null}
-      {tab === "dictionary" ? <DictionaryTab projectId={overview.id} /> : null}
-      {tab === "overview" ? <OverviewTab overview={overview} /> : null}
+    </div>
     </section>
   );
 }
 
-function OverviewTab({ overview }: { overview: ProjectOverview }) {
-  return (
-    <div className="overview-grid">
-      <div className="metric-card">
-        <span>Chapters</span>
-        <strong>{overview.chaptersCount}</strong>
-      </div>
-      <div className="metric-card">
-        <span>Characters</span>
-        <strong>{overview.charactersCount}</strong>
-      </div>
-      <div className="metric-card">
-        <span>General terms</span>
-        <strong>{overview.generalTermsCount}</strong>
-      </div>
-      <div className="metric-card">
-        <span>Last modified</span>
-        <strong>{formatDate(overview.lastModifiedAt)}</strong>
-      </div>
-      <div className="context-panel">
-        <h2>Work Context</h2>
-        <p>{overview.contextSummary}</p>
-      </div>
-      <div className="context-panel">
-        <h2>Progress</h2>
-        <ProgressBar value={overview.progress} />
-        <p>{overview.progress}% of the active project workflow is complete.</p>
-      </div>
-    </div>
-  );
-}
-
-function ChaptersTab({ projectId }: { projectId: string }) {
+function ChaptersTab({ projectId, overview }: { projectId: string; overview: any }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [isCreateChapterOpen, setIsCreateChapterOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [chapterForm, setChapterForm] = useState<CreateChapterFormState>(
     defaultCreateChapterForm,
   );
@@ -1785,43 +1926,109 @@ function ChaptersTab({ projectId }: { projectId: string }) {
 
   if (chaptersQuery.isLoading) return <LoadingPanel label="Loading chapters" />;
   const rows = chaptersQuery.data ?? [];
+  
+  const filteredRows = rows.filter(ch => 
+    ch.displayLabel.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    (ch.title || "").toLowerCase().includes(searchQuery.toLowerCase())
+  );
+  
+  const otherRows = [...filteredRows].sort((a, b) => {
+    const labelA = a.displayLabel || "";
+    const labelB = b.displayLabel || "";
+    return sortOrder === "asc" ? labelA.localeCompare(labelB, undefined, { numeric: true }) : labelB.localeCompare(labelA, undefined, { numeric: true });
+  });
 
   return (
-    <div className="table-card">
-      <div className="table-title">
-        <div>
-          <h2>Chapters</h2>
-          <span>{rows.length} chapters</span>
-        </div>
-        <button
-          className="floirs-button"
-          type="button"
-          onClick={() => setIsCreateChapterOpen(true)}
-        >
-          <Plus size={16} />
-          Add chapter
-        </button>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       {prepareChapterMutation.isError ? (
-        <p className="error-line">
-          {prepareChapterMutation.error instanceof Error
-            ? prepareChapterMutation.error.message
-            : "Could not download chapter"}
-        </p>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+          <p className="danger text-center">
+            {prepareChapterMutation.error instanceof Error
+              ? prepareChapterMutation.error.message
+              : "Could not download chapter"}
+          </p>
+        </div>
       ) : null}
-      <div className="chapter-list">
-        {rows.map((chapter) => (
-          <ChapterRow
-            key={chapter.id}
-            chapter={chapter}
-            isPreparing={
-              prepareChapterMutation.isPending &&
-              prepareChapterMutation.variables === chapter.id
-            }
-            onOpen={() => prepareChapterMutation.mutate(chapter.id)}
-          />
-        ))}
-      </div>
+        {/* Main Table (Other Chapters) */}
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#fff', fontWeight: 600 }}>All Chapters</h3>
+              <span style={{ fontSize: '0.85rem', color: '#888', position: 'relative', top: '2px' }}>{filteredRows.length} chapters</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <div style={{ position: 'relative', width: '240px' }}>
+                <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#888' }} />
+                <input 
+                  type="text" 
+                  placeholder="Search chapters..." 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ 
+                    width: '100%', 
+                    padding: '8px 12px 8px 36px', 
+                    borderRadius: '6px', 
+                    border: '1px solid #333', 
+                    backgroundColor: '#1a1a1a', 
+                    color: '#fff',
+                    fontSize: '0.9rem',
+                    outline: 'none'
+                  }} 
+                />
+              </div>
+              <button
+                className="button"
+                type="button"
+                style={{ 
+                  height: '36px', 
+                  minHeight: '36px', 
+                  padding: '0 16px', 
+                  fontSize: '0.85rem',
+                  backgroundColor: '#1a1a1a',
+                  border: '1px solid #333',
+                  color: '#ddd',
+                  transition: 'border-color 0.2s'
+                }} 
+                onMouseOver={(e) => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)'}
+                onMouseOut={(e) => e.currentTarget.style.borderColor = '#333'}
+                onClick={() => setIsCreateChapterOpen(true)}
+              >
+                <Plus size={16} />
+                Add chapter
+              </button>
+            </div>
+          </div>
+          <div className="series-detail__table-wrap">
+            <div className="series-detail__table project-chapters-table">
+              <div className="series-detail__table-head" style={{ position: 'relative' }}>
+                <span>TITLE</span>
+                <span style={{ textAlign: 'center' }}>STATUS</span>
+                <button
+                  type="button"
+                  onClick={() => setSortOrder(prev => prev === "desc" ? "asc" : "desc")}
+                  title={sortOrder === "desc" ? "Sort A-Z" : "Sort Z-A"}
+                  style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#F0E6D2', transition: 'color 0.2s' }}
+                >
+                  <ArrowUpDown size={14} />
+                </button>
+              </div>
+              {otherRows.map((chapter) => (
+                <ChapterRow
+                  key={chapter.id}
+                  chapter={chapter}
+                  isPreparing={
+                    prepareChapterMutation.isPending &&
+                    prepareChapterMutation.variables === chapter.id
+                  }
+                  onOpen={() => prepareChapterMutation.mutate(chapter.id)}
+                />
+              ))}
+              {otherRows.length === 0 && (
+                <div style={{ padding: '24px', textAlign: 'center', color: '#888' }}>No other chapters</div>
+              )}
+            </div>
+          </div>
+        </div>
       {isCreateChapterOpen ? (
         <CreateChapterDialog
           error={
@@ -1877,19 +2084,18 @@ function CreateChapterDialog({
         onClick={(event) => event.stopPropagation()}
         onSubmit={onSubmit}
       >
-        <div className="modal-head">
+        <div className="modal-head" style={{ marginBottom: '24px' }}>
           <div>
-            <p className="eyebrow">Library</p>
-            <h2>Add chapter</h2>
+            <h2 style={{ fontSize: '1.4rem', margin: 0 }}>Add chapter</h2>
           </div>
-          <button className="floirs-button floirs-button--icon" onClick={onClose} type="button" title="Close">
-            <X size={16} />
+          <button className="icon-button" onClick={onClose} type="button" title="Close" style={{ background: 'transparent', border: 'none', color: '#888' }}>
+            <X size={20} />
           </button>
         </div>
 
-        <div className="editor-grid create-chapter-grid">
+        <div className="dictionary-editor" style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '16px', marginBottom: '24px' }}>
           <label className="form-field">
-            <span>Chapter number</span>
+            <span style={{ marginBottom: '4px', color: '#888' }}>Chapter number</span>
             <input
               autoFocus
               required
@@ -1899,28 +2105,33 @@ function CreateChapterDialog({
             />
           </label>
           <label className="form-field">
-            <span>Title</span>
+            <span style={{ marginBottom: '4px', color: '#888' }}>Title</span>
             <input
               value={form.title}
               onChange={(event) => onChange({ ...form, title: event.target.value })}
               placeholder="Optional"
             />
           </label>
-          <div className="form-field full">
-            <span>Page images</span>
-            <div className="chapter-image-picker">
-              <button className="floirs-button" type="button" onClick={onChooseImages}>
-                <ImageIcon size={16} />
+          <div className="form-field full" style={{ gridColumn: '1 / -1', marginTop: '8px' }}>
+            <span style={{ marginBottom: '8px', color: '#888' }}>Page images</span>
+            <div className="chapter-image-picker" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <button 
+                className="button" 
+                type="button" 
+                style={{ height: '36px', backgroundColor: '#1a1a1a', border: '1px solid #333', color: '#ddd' }}
+                onClick={onChooseImages}
+              >
+                <ImageIcon size={15} />
                 Choose images
               </button>
-              <strong>{form.imagePaths.length} selected</strong>
+              <strong style={{ color: '#888', fontWeight: 500 }}>{form.imagePaths.length} selected</strong>
             </div>
             {form.imagePaths.length > 0 ? (
-              <div className="selected-file-list">
+              <div className="selected-file-list" style={{ marginTop: '12px', padding: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', border: '1px solid #222' }}>
                 {selectedPreview.map((imagePath) => (
-                  <span key={imagePath}>{fileNameFromPath(imagePath)}</span>
+                  <span key={imagePath} style={{ display: 'inline-block', marginRight: '12px', color: '#aaa', fontSize: '0.85rem' }}>{fileNameFromPath(imagePath)}</span>
                 ))}
-                {remainingCount > 0 ? <span>+{remainingCount} more</span> : null}
+                {remainingCount > 0 ? <span style={{ color: '#fff' }}>+{remainingCount} more</span> : null}
               </div>
             ) : null}
           </div>
@@ -1929,12 +2140,18 @@ function CreateChapterDialog({
         {imagePickerError ? <p className="error-line">{imagePickerError}</p> : null}
         {error ? <p className="error-line">{error}</p> : null}
 
-        <div className="form-actions end">
-          <button className="floirs-button" type="button" onClick={onClose} disabled={isSaving}>
+        <div className="form-actions end" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '16px' }}>
+          <button 
+            className="button" 
+            type="button" 
+            onClick={onClose} 
+            disabled={isSaving}
+            style={{ background: 'transparent', border: '1px solid transparent', color: '#888' }}
+          >
             Cancel
           </button>
-          <button className="floirs-button" type="submit" disabled={!canSubmit}>
-            {isSaving ? "Creating" : "Create chapter"}
+          <button className="floirs-button" type="submit" disabled={!canSubmit} style={{ padding: '0 20px' }}>
+            {isSaving ? "Creating..." : "Create chapter"}
           </button>
         </div>
       </form>
@@ -1945,36 +2162,84 @@ function CreateChapterDialog({
 function ChapterRow({
   chapter,
   isPreparing,
+  isSubTable,
+  extraColumn,
   onOpen,
 }: {
   chapter: Chapter;
   isPreparing: boolean;
+  isSubTable?: boolean;
+  extraColumn?: boolean;
   onOpen: () => void;
 }) {
+  const [isHovered, setIsHovered] = useState(false);
+
   return (
-    <button
-      className="chapter-row chapter-row-button"
-      type="button"
-      disabled={isPreparing}
-      onClick={onOpen}
+    <div
+      className="series-detail__table-row"
+      onClick={isPreparing ? undefined : onOpen}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      style={isPreparing ? { opacity: 0.5, pointerEvents: 'none' } : { cursor: 'pointer', position: 'relative', paddingRight: isSubTable ? '40px' : undefined }}
     >
-      <strong>{chapter.displayLabel}</strong>
-      <span>{chapter.title ?? "Untitled"}</span>
-      <span className={`status-chip ${statusClass(chapter.status)}`}>{chapter.status}</span>
-      <span
-        className={`status-chip ${statusClass(isPreparing ? "Downloading" : chapter.downloadStatus)}`}
-        title={chapter.downloadError ?? chapter.downloadStatus}
-      >
-        {isPreparing ? "Downloading" : chapter.downloadStatus}
-      </span>
-      <span className="internal-status">{chapter.internalStatus}</span>
-      <span>{chapter.pagesCount} pages</span>
-      <span>{chapter.textUnitsCount} text units</span>
-      <div className="row-progress">
-        <ProgressBar value={chapter.progress} />
-        <small>{chapter.progress}%</small>
+      <div className="series-detail__cell series-detail__cell--title" title={chapter.title || "Untitled"}>
+        <span className="series-detail__title-text">
+          {chapter.displayLabel} - {chapter.title || "Untitled"}
+        </span>
       </div>
-    </button>
+      {!isSubTable && (
+        <div className="series-detail__cell" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '8px', justifyContent: 'center', flexWrap: 'nowrap' }}>
+          <span className={`status-chip ${statusClass(chapter.status)}`}>{chapter.status}</span>
+          {(isPreparing || chapter.downloadStatus !== "Downloaded") && (
+            <span
+              className={`status-chip ${statusClass(isPreparing ? "Downloading" : chapter.downloadStatus)}`}
+              title={chapter.downloadError ?? chapter.downloadStatus}
+            >
+              {isPreparing ? "Downloading" : chapter.downloadStatus}
+            </span>
+          )}
+        </div>
+      )}
+      {isSubTable && (
+        <div className="series-detail__cell" style={{ textAlign: 'right', color: '#888', fontSize: '0.85rem' }}>
+          {formatDate(chapter.updatedAt as any)}
+        </div>
+      )}
+
+      {isSubTable && isHovered && (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+          style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5, cursor: 'pointer', display: 'flex' }}
+        >
+          <X size={16} />
+        </div>
+      )}
+
+      {!isSubTable && (
+        <div style={{ 
+          position: 'absolute', 
+          right: '24px', 
+          top: '50%', 
+          transform: 'translateY(-50%)', 
+          opacity: isHovered ? 1 : 0.3, 
+          transition: 'all 0.2s ease', 
+          color: isHovered ? '#fff' : '#888',
+          border: isHovered ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid #333',
+          backgroundColor: isHovered ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
+          borderRadius: '8px',
+          width: '32px',
+          height: '32px',
+          display: 'flex', 
+          justifyContent: 'center',
+          alignItems: 'center', 
+          pointerEvents: 'none' 
+        }}>
+          <Eye size={15} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2180,60 +2445,94 @@ function DictionaryTab({ projectId }: { projectId: string }) {
 
   return (
     <div className="dictionary-view">
-      <div className="subtabs">
-        <button className={section === "characters" ? "active" : ""} onClick={() => selectSection("characters")}>
-          Characters
-        </button>
-        <button className={section === "glossary" ? "active" : ""} onClick={() => selectSection("glossary")}>
-          General Glossary
-        </button>
-      </div>
-
-      <div className="dictionary-toolbar">
-        <div className="floirs-search-shell">
-          <input
-            className="floirs-search-input"
-            type="search"
-            value={searchValue}
-            onChange={(event) => setSearchValue(event.target.value)}
-            placeholder={section === "characters" ? "Search characters" : "Search terms"}
-          />
-          <Search size={16} />
-        </div>
-        {section === "characters" ? (
-          <select
-            className="field-select"
-            value={genderFilter}
-            onChange={(event) => setGenderFilter(event.target.value as Gender | "All")}
-          >
-            <option value="All">All genders</option>
-            {genderOptions.map((gender) => (
-              <option key={gender} value={gender}>{gender}</option>
-            ))}
-          </select>
-        ) : (
-          <select
-            className="field-select"
-            value={categoryFilter}
-            onChange={(event) => setCategoryFilter(event.target.value)}
-          >
-            <option value="All">All categories</option>
-            {categoryOptions.map((category) => (
-              <option key={category} value={category}>{category}</option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      {section === "characters" ? (
-        <div className="table-card">
-          <div className="table-title">
-            <h2>Characters</h2>
-            <button className="floirs-button" onClick={openAddCharacter}>
-              <Plus size={16} />
-              Add character
+      <div className="table-card" style={{ padding: '24px' }}>
+        
+        {/* Unified Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+          
+          <div className="page-switcher" style={{ margin: 0 }}>
+            <button className={section === "characters" ? "active" : ""} onClick={() => selectSection("characters")}>
+              Characters
+            </button>
+            <button className={section === "glossary" ? "active" : ""} onClick={() => selectSection("glossary")}>
+              General Glossary
             </button>
           </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', width: '220px' }}>
+              <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#888' }} />
+              <input 
+                type="text" 
+                placeholder={section === "characters" ? "Search characters..." : "Search terms..."} 
+                value={searchValue}
+                onChange={(event) => setSearchValue(event.target.value)}
+                style={{ 
+                  width: '100%', 
+                  padding: '8px 12px 8px 36px', 
+                  borderRadius: '6px', 
+                  border: '1px solid #333', 
+                  backgroundColor: '#1a1a1a', 
+                  color: '#fff',
+                  fontSize: '0.85rem',
+                  outline: 'none',
+                  height: '36px'
+                }}
+                onFocus={(e) => e.target.style.borderColor = 'rgba(255, 255, 255, 0.4)'}
+                onBlur={(e) => e.target.style.borderColor = '#333'}
+              />
+            </div>
+
+            {section === "characters" ? (
+              <select
+                className="field-select"
+                style={{ height: '36px', width: 'auto', minWidth: '120px', fontSize: '0.85rem' }}
+                value={genderFilter}
+                onChange={(event) => setGenderFilter(event.target.value as Gender | "All")}
+              >
+                <option value="All">All genders</option>
+                {genderOptions.map((gender) => (
+                  <option key={gender} value={gender}>{gender}</option>
+                ))}
+              </select>
+            ) : (
+              <select
+                className="field-select"
+                style={{ height: '36px', width: 'auto', minWidth: '120px', fontSize: '0.85rem' }}
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+              >
+                <option value="All">All categories</option>
+                {categoryOptions.map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
+              </select>
+            )}
+
+            <button 
+              className="button" 
+              style={{ 
+                height: '36px', 
+                minHeight: '36px', 
+                padding: '0 16px', 
+                fontSize: '0.85rem',
+                backgroundColor: '#1a1a1a',
+                border: '1px solid #333',
+                color: '#ddd',
+                transition: 'border-color 0.2s'
+              }} 
+              onMouseOver={(e) => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)'}
+              onMouseOut={(e) => e.currentTarget.style.borderColor = '#333'}
+              onClick={section === "characters" ? openAddCharacter : openAddTerm}
+            >
+              <Plus size={15} />
+              {section === "characters" ? "Add character" : "Add term"}
+            </button>
+          </div>
+        </div>
+
+      {section === "characters" ? (
+        <>
           {characterForm ? (
             <form className="dictionary-editor" onSubmit={submitCharacter}>
               <div className="editor-grid">
@@ -2241,6 +2540,7 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                   <span>English Name</span>
                   <input
                     required
+                    autoFocus
                     value={characterForm.englishName}
                     onChange={(event) =>
                       setCharacterForm({ ...characterForm, englishName: event.target.value })
@@ -2326,7 +2626,7 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                     />
                     <button
                       type="button"
-                      className="floirs-button floirs-button--icon"
+                      className="floirs-button floirs-button--icon danger"
                       title="Remove alias"
                       onClick={() =>
                         setCharacterForm({
@@ -2374,7 +2674,7 @@ function DictionaryTab({ projectId }: { projectId: string }) {
               <div className="dictionary-row" key={character.id}>
                 <strong>{character.englishName}</strong>
                 <span dir="rtl">{character.arabicName}</span>
-                <span>{character.gender}</span>
+                <div><span className="category-tag">{character.gender}</span></div>
                 <span>
                   {character.aliases.map((alias) => `${alias.english} / ${alias.arabic}`).join(", ") || "None"}
                 </span>
@@ -2384,7 +2684,7 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                     <Edit3 size={15} />
                   </button>
                   <button
-                    className="icon-button danger"
+                    className="floirs-button floirs-button--icon danger"
                     title="Delete character"
                     onClick={() => {
                       if (window.confirm(`Delete ${character.englishName}?`)) {
@@ -2397,18 +2697,15 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                 </div>
               </div>
             ))}
-            {filteredCharacters.length === 0 ? <EmptyPanel label="No matching characters" /> : null}
+            {filteredCharacters.length === 0 ? (
+              <p className="muted" style={{ padding: "20px", textAlign: "center" }}>
+                No characters found.
+              </p>
+            ) : null}
           </div>
-        </div>
+        </>
       ) : (
-        <div className="table-card">
-          <div className="table-title">
-            <h2>General Glossary</h2>
-            <button className="floirs-button" onClick={openAddTerm}>
-              <Plus size={16} />
-              Add term
-            </button>
-          </div>
+        <>
           {termForm ? (
             <form className="dictionary-editor" onSubmit={submitTerm}>
               <div className="editor-grid">
@@ -2416,10 +2713,9 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                   <span>English Term</span>
                   <input
                     required
+                    autoFocus
                     value={termForm.englishTerm}
-                    onChange={(event) =>
-                      setTermForm({ ...termForm, englishTerm: event.target.value })
-                    }
+                    onChange={(event) => setTermForm({ ...termForm, englishTerm: event.target.value })}
                   />
                 </label>
                 <label className="form-field">
@@ -2428,38 +2724,29 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                     required
                     dir="rtl"
                     value={termForm.arabicTerm}
-                    onChange={(event) =>
-                      setTermForm({ ...termForm, arabicTerm: event.target.value })
-                    }
+                    onChange={(event) => setTermForm({ ...termForm, arabicTerm: event.target.value })}
                   />
                 </label>
                 <label className="form-field">
                   <span>Category</span>
-                  <input
-                    required
-                    list="glossary-category-options"
+                  <select
                     value={termForm.category}
                     onChange={(event) => setTermForm({ ...termForm, category: event.target.value })}
-                  />
+                  >
+                    {categoryOptions.map((category) => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
+                  </select>
                 </label>
                 <label className="form-field full">
                   <span>Description</span>
                   <textarea
                     value={termForm.description}
-                    onChange={(event) =>
-                      setTermForm({ ...termForm, description: event.target.value })
-                    }
+                    onChange={(event) => setTermForm({ ...termForm, description: event.target.value })}
                   />
                 </label>
               </div>
-              <datalist id="glossary-category-options">
-                {categoryOptions.map((category) => (
-                  <option key={category} value={category} />
-                ))}
-              </datalist>
-              {termMutationError ? (
-                <p className="error-line">{(termMutationError as Error).message}</p>
-              ) : null}
+              {termMutationError ? <p className="error-line">{(termMutationError as Error).message}</p> : null}
               <div className="form-actions">
                 <button className="floirs-button" disabled={isTermSaving} type="submit">
                   <Save size={16} />
@@ -2478,11 +2765,6 @@ function DictionaryTab({ projectId }: { projectId: string }) {
               </div>
             </form>
           ) : null}
-          <div className="category-row">
-            {categoryOptions.map((category) => (
-              <span key={category}>{category}</span>
-            ))}
-          </div>
           <div className="dictionary-table terms-table">
             <div className="dictionary-head">
               <span>English Term</span>
@@ -2495,14 +2777,14 @@ function DictionaryTab({ projectId }: { projectId: string }) {
               <div className="dictionary-row" key={term.id}>
                 <strong>{term.englishTerm}</strong>
                 <span dir="rtl">{term.arabicTerm}</span>
-                <span>{term.category}</span>
+                <div><span className="category-tag">{term.category}</span></div>
                 <span>{term.description ?? "No description"}</span>
                 <div className="row-actions">
                   <button className="floirs-button floirs-button--icon" title="Edit term" onClick={() => openEditTerm(term)}>
                     <Edit3 size={15} />
                   </button>
                   <button
-                    className="icon-button danger"
+                    className="floirs-button floirs-button--icon danger"
                     title="Delete term"
                     onClick={() => {
                       if (window.confirm(`Delete ${term.englishTerm}?`)) {
@@ -2515,10 +2797,15 @@ function DictionaryTab({ projectId }: { projectId: string }) {
                 </div>
               </div>
             ))}
-            {filteredTerms.length === 0 ? <EmptyPanel label="No matching terms" /> : null}
+            {filteredTerms.length === 0 ? (
+              <p className="muted" style={{ padding: "20px", textAlign: "center" }}>
+                No terms found.
+              </p>
+            ) : null}
           </div>
-        </div>
+        </>
       )}
+      </div>
     </div>
   );
 }
@@ -2544,6 +2831,10 @@ function TranslationPage() {
   const [ocrProviderId, setOcrProviderId] = useState<OcrProviderId>("windows");
   const [ocrLanguageHint, setOcrLanguageHint] = useState("english");
   const [replaceOcrText, setReplaceOcrText] = useState(true);
+  const [autoCleanOcrText, setAutoCleanOcrText] = useState(false);
+  const [autoCleanPolicy, setAutoCleanPolicy] = useState<CleanPolicy>("safe_bubbles_only");
+  const [autoCleanProvider, setAutoCleanProvider] = useState<CleanProviderId>("bubble_fill");
+  const [autoCleanMaskExpansion, setAutoCleanMaskExpansion] = useState(6);
   const [ocrSelection, setOcrSelection] = useState<OcrSelectionState | null>(null);
   const [cleanSelection, setCleanSelection] = useState<OcrSelectionState | null>(null);
   const [textBoxDraft, setTextBoxDraft] = useState<TextBoxDraftState | null>(null);
@@ -2552,6 +2843,9 @@ function TranslationPage() {
   const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE);
   const [cleanStrength, setCleanStrength] = useState(DEFAULT_CLEAN_STRENGTH);
   const [cleanMethod, setCleanMethod] = useState<"telea" | "ns">("telea");
+  const [cleanProvider, setCleanProvider] = useState<CleanProviderId>("bubble_fill");
+  const [microsoftScope, setMicrosoftScope] = useState<"page" | "chapter">("page");
+  const [ocrStatus, setOcrStatus] = useState("");
   const [cleanStatus, setCleanStatus] = useState("");
   const [colorPickStatus, setColorPickStatus] = useState("");
   const {
@@ -2685,12 +2979,7 @@ function TranslationPage() {
       input,
       pageId,
     }: {
-      input: {
-        feather: number;
-        maskExpansion: number;
-        method: "telea" | "ns";
-        region: RegionBox;
-      };
+      input: PageCleanTextInput;
       pageId: string;
     }) => cleanPageText(pageId, input),
     onSuccess: (mark) => {
@@ -2718,6 +3007,7 @@ function TranslationPage() {
     mutationFn: ({ pageId, input }: { pageId: string; input: OcrRunOptions }) =>
       runOcrForPage(pageId, input),
     onSuccess: (result) => {
+      setOcrStatus(ocrResultStatus(result));
       queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
       queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
@@ -2727,6 +3017,7 @@ function TranslationPage() {
     mutationFn: ({ input, pageId }: { input: OcrRegionRunOptions; pageId: string }) =>
       runOcrForRegion(pageId, input),
     onSuccess: (result) => {
+      setOcrStatus(ocrResultStatus(result));
       queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
       queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
@@ -2736,6 +3027,48 @@ function TranslationPage() {
     mutationFn: ({ id, input }: { id: string; input: OcrRunOptions }) =>
       runOcrForChapter(id, input),
     onSuccess: (result) => {
+      setOcrStatus(ocrResultStatus(result));
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+  });
+  const microsoftTranslationMutation = useMutation({
+    mutationFn: translateWithMicrosoft,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+  });
+  const deleteOcrResultsMutation = useMutation({
+    mutationFn: deleteOcrResults,
+    onSuccess: (result) => {
+      setSelectedTextUnitId("");
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+  });
+  const mergeChapterPagesMutation = useMutation({
+    mutationFn: ({ id }: { id: string }) => mergeChapterPages(id, {
+      direction: "vertical",
+      pairSize: 2,
+      replaceExisting: true,
+    }),
+    onSuccess: (result) => {
+      setSelectedPageId("");
+      setSelectedTextUnitId("");
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+  });
+  const removeMergedPagesMutation = useMutation({
+    mutationFn: removeMergedPages,
+    onSuccess: (result) => {
+      setSelectedPageId("");
+      setSelectedTextUnitId("");
       queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
       queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
@@ -2804,8 +3137,9 @@ function TranslationPage() {
   const pageTextUnits = textUnitsByPage.get(currentPage.id) ?? [];
   const currentPageEditMarks = editMarksByPage.get(currentPage.id) ?? [];
   const lastCurrentPageEditMark = currentPageEditMarks[currentPageEditMarks.length - 1];
-  const selectedTextUnit =
-    workspace.textUnits.find((unit) => unit.id === selectedTextUnitId) ?? workspace.textUnits[0];
+  const currentPageAutoCleanPatchCount = currentPageEditMarks.filter(isAutoCleanPatch).length;
+  const explicitSelectedTextUnit = workspace.textUnits.find((unit) => unit.id === selectedTextUnitId);
+  const selectedTextUnit = explicitSelectedTextUnit ?? workspace.textUnits[0];
   const selectedFontSize = clampTextUnitFontSize(selectedTextUnit?.typesetting.fontSize ?? 18);
 
   const selectedDictionaryText = dictionaryTextForUnit(selectedTextUnit);
@@ -3109,6 +3443,12 @@ function TranslationPage() {
     if (!lastCurrentPageEditMark || deletePageEditMarkMutation.isPending) return;
     deletePageEditMarkMutation.mutate(lastCurrentPageEditMark.id);
   };
+  const restoreAutoCleanPatch = (event: PointerEvent<SVGRectElement>, mark: PageEditMark) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (activeTool !== "restore-clean" || deletePageEditMarkMutation.isPending || !isAutoCleanPatch(mark)) return;
+    deletePageEditMarkMutation.mutate(mark.id);
+  };
   const runCleanSelection = (selection: OcrSelectionState) => {
     const region = normalizeSelectionRegion(selection);
     if (!region || cleanPageTextMutation.isPending) return;
@@ -3119,12 +3459,21 @@ function TranslationPage() {
         feather: cleanSettings.feather,
         maskExpansion: cleanSettings.maskExpansion,
         method: cleanMethod,
+        mode: "manual_selection",
+        policy: "force_all_regions",
+        provider: cleanProvider,
         region,
+        source: "manual_clean",
       },
       pageId: selection.pageId,
     });
   };
   const ocrInput: OcrRunOptions = {
+    autoCleanFeather: 2,
+    autoCleanMaskExpansion,
+    autoCleanPolicy: autoCleanProvider === "algorithm" ? "force_all_regions" : autoCleanPolicy,
+    autoCleanProvider,
+    autoCleanText: autoCleanOcrText,
     languageHint: ocrLanguageHint || undefined,
     providerId: ocrProviderId,
     replaceExisting: replaceOcrText,
@@ -3144,11 +3493,13 @@ function TranslationPage() {
           : null;
   const runCurrentPageOcr = () => {
     if (!currentPage || isOcrRunning) return;
+    setOcrStatus(autoCleanOcrText ? "Running OCR with auto-clean..." : "Running OCR...");
     runPageOcrMutation.mutate({ input: ocrInput, pageId: currentPage.id });
   };
   const runOcrSelection = (selection: OcrSelectionState) => {
     const region = normalizeSelectionRegion(selection);
     if (!region || isOcrRunning || !selectedProvider?.available) return;
+    setOcrStatus(autoCleanOcrText ? "Running selected OCR with auto-clean..." : "Running selected OCR...");
     runRegionOcrMutation.mutate({
       input: {
         ...ocrInput,
@@ -3161,7 +3512,58 @@ function TranslationPage() {
   };
   const runWholeChapterOcr = () => {
     if (!chapterId || isOcrRunning) return;
+    setOcrStatus(autoCleanOcrText ? "Running chapter OCR with auto-clean..." : "Running chapter OCR...");
     runChapterOcrMutation.mutate({ id: chapterId, input: ocrInput });
+  };
+  const runMicrosoftTranslation = () => {
+    if (!chapterId || microsoftTranslationMutation.isPending) return;
+    if (explicitSelectedTextUnit) {
+      microsoftTranslationMutation.mutate({
+        chapterId,
+        scope: "text_unit",
+        textUnitId: explicitSelectedTextUnit.id,
+      });
+      return;
+    }
+    if (microsoftScope === "page" && currentPage) {
+      microsoftTranslationMutation.mutate({
+        chapterId,
+        pageId: currentPage.id,
+        scope: "page",
+      });
+      return;
+    }
+    microsoftTranslationMutation.mutate({
+      chapterId,
+      scope: "chapter",
+    });
+  };
+  const clearChapterOcrResults = () => {
+    if (!chapterId || deleteOcrResultsMutation.isPending || workspace.textUnits.length === 0) return;
+    const confirmed = window.confirm(
+      "Delete OCR results for this chapter? This removes OCR text, OCR candidates, translations tied to them, and auto-clean patches. Manual edits are kept.",
+    );
+    if (!confirmed) return;
+    deleteOcrResultsMutation.mutate({
+      chapterId,
+      includeAutoCleanPatches: true,
+      keepManualEdits: true,
+    });
+  };
+  const hasMergedPages = workspace.pages.some((page) => page.pageKind === "merged");
+  const mergeChapterPairs = () => {
+    if (!chapterId || mergeChapterPagesMutation.isPending || workspace.pages.length === 0) return;
+    const confirmed = window.confirm(
+      "Merge every 2 original pages in this chapter into vertical merged pages? Original pages are kept.",
+    );
+    if (!confirmed) return;
+    mergeChapterPagesMutation.mutate({ id: chapterId });
+  };
+  const removeChapterMergedPages = () => {
+    if (!chapterId || removeMergedPagesMutation.isPending || !hasMergedPages) return;
+    const confirmed = window.confirm("Remove merged pages and return this chapter to original pages?");
+    if (!confirmed) return;
+    removeMergedPagesMutation.mutate(chapterId);
   };
   const startOcrTextSelection = () => {
     ocrSelectionRef.current = null;
@@ -3302,12 +3704,6 @@ function TranslationPage() {
     height: page.height * zoom,
     width: page.width * zoom,
   });
-  const editWhiteoutRegionStyle = (unit: TextUnit) => ({
-    height: Math.max(8, unit.region.height * zoom),
-    left: unit.region.x * zoom,
-    top: unit.region.y * zoom,
-    width: Math.max(8, unit.region.width * zoom),
-  });
   const editRegionStyle = (unit: TextUnit) => {
     const box = textBoxForUnit(unit);
     return {
@@ -3330,18 +3726,31 @@ function TranslationPage() {
     );
   const renderEditMark = (mark: PageEditMark, className = "edit-mark-path") => {
     if (mark.kind === "clean_patch" && mark.region && mark.patchUrl) {
+      const canRestore = activeTool === "restore-clean" && isAutoCleanPatch(mark);
       return (
-        <image
-          className="clean-patch-image"
-          height={mark.region.height}
-          href={mark.patchUrl}
-          key={mark.id}
-          opacity={mark.opacity}
-          preserveAspectRatio="none"
-          width={mark.region.width}
-          x={mark.region.x}
-          y={mark.region.y}
-        />
+        <g key={mark.id}>
+          <image
+            className="clean-patch-image"
+            height={mark.region.height}
+            href={mark.patchUrl}
+            opacity={mark.opacity}
+            preserveAspectRatio="none"
+            width={mark.region.width}
+            x={mark.region.x}
+            y={mark.region.y}
+          />
+          {canRestore ? (
+            <rect
+              className="restore-clean-target"
+              height={mark.region.height}
+              onPointerDown={(event) => restoreAutoCleanPatch(event, mark)}
+              rx={8}
+              width={mark.region.width}
+              x={mark.region.x}
+              y={mark.region.y}
+            />
+          ) : null}
+        </g>
       );
     }
 
@@ -3368,7 +3777,9 @@ function TranslationPage() {
             ? "edit-drawing-layer is-color-picking"
             : activeTool === "clean"
               ? "edit-drawing-layer is-cleaning"
-              : "edit-drawing-layer"
+              : activeTool === "restore-clean"
+                ? "edit-drawing-layer is-restoring-clean"
+                : "edit-drawing-layer"
       }
       viewBox={`0 0 ${page.width} ${page.height}`}
       onPointerCancel={(event) => endDrawing(event, page)}
@@ -3499,13 +3910,12 @@ function TranslationPage() {
     >
       {renderPageArtwork(page)}
       {renderDrawingLayer(page, marks)}
-      <div className={activeTool === "draw" || activeTool === "color-picker" || activeTool === "clean" ? "edit-work-layer is-passive" : "edit-work-layer"}>
+      <div className={activeTool === "draw" || activeTool === "color-picker" || activeTool === "clean" || activeTool === "restore-clean" ? "edit-work-layer is-passive" : "edit-work-layer"}>
         {units.map((unit) => {
           const label = unit.finalTranslation || unit.microsoftTranslation || unit.aiTranslation || unit.sourceText;
           const isSelected = unit.id === selectedTextUnit?.id;
           return (
             <div className="edit-text-item" key={unit.id}>
-              <div className="edit-whiteout-region" style={editWhiteoutRegionStyle(unit)} />
               <button
                 className={isSelected ? "edit-text-region selected" : "edit-text-region"}
                 onClick={() => selectTextUnit(unit)}
@@ -3618,8 +4028,57 @@ function TranslationPage() {
             <Layers3 size={15} />
             Chapter OCR
           </button>
+          <button
+            className="floirs-button"
+            disabled={deleteOcrResultsMutation.isPending || workspace.textUnits.length === 0}
+            onClick={clearChapterOcrResults}
+            title="Delete OCR results in this chapter"
+            type="button"
+          >
+            <Trash2 size={15} />
+            Clear OCR
+          </button>
+          <button
+            className="floirs-button"
+            disabled={mergeChapterPagesMutation.isPending || workspace.pages.length === 0}
+            onClick={mergeChapterPairs}
+            title="Merge every two original pages vertically"
+            type="button"
+          >
+            <Layers3 size={15} />
+            Merge pages
+          </button>
+          <button
+            className="floirs-button"
+            disabled={removeMergedPagesMutation.isPending || !hasMergedPages}
+            onClick={removeChapterMergedPages}
+            title="Remove merged pages"
+            type="button"
+          >
+            <X size={15} />
+            Unmerge
+          </button>
           <button className="floirs-button"><Sparkles size={15} />AI Translate</button>
-          <button className="floirs-button"><Languages size={15} />Microsoft</button>
+          <select
+            className="field-select translation-scope-select"
+            disabled={microsoftTranslationMutation.isPending}
+            onChange={(event) => setMicrosoftScope(event.target.value as "page" | "chapter")}
+            title="Microsoft translation scope when no OCR result is selected"
+            value={microsoftScope}
+          >
+            <option value="page">MS Page</option>
+            <option value="chapter">MS Chapter</option>
+          </select>
+          <button
+            className="floirs-button"
+            disabled={microsoftTranslationMutation.isPending || workspace.textUnits.length === 0}
+            onClick={runMicrosoftTranslation}
+            title={explicitSelectedTextUnit ? "Translate selected text with Microsoft" : `Translate ${microsoftScope} with Microsoft`}
+            type="button"
+          >
+            <Languages size={15} />
+            Microsoft
+          </button>
           <button className="floirs-button"><ShieldCheck size={15} />Quality</button>
           <button className="floirs-button"><Download size={15} />Export</button>
         </div>
@@ -3636,8 +4095,84 @@ function TranslationPage() {
           {selectedProvider && !selectedProvider.available ? (
             <p className="ocr-status-line">{selectedProvider.reason ?? selectedProvider.setup}</p>
           ) : null}
+          <div className="ocr-options-panel">
+            <div className="ocr-options-head">
+              <strong>Auto-clean OCR</strong>
+              <span>{autoCleanOcrText ? "On" : "Off"}</span>
+            </div>
+            <label className="compact-check" title="Automatically delete recognized source text from the edit page after OCR">
+              <input
+                type="checkbox"
+                checked={autoCleanOcrText}
+                onChange={(event) => setAutoCleanOcrText(event.target.checked)}
+              />
+              Clean after OCR
+            </label>
+            <label className="ocr-option-field">
+              <span>Cleaner</span>
+              <select
+                className="field-select"
+                disabled={!autoCleanOcrText}
+                value={autoCleanProvider}
+                onChange={(event) => setAutoCleanProvider(event.target.value as CleanProviderId)}
+              >
+                <option value="algorithm">الخوارزمية - Recommended</option>
+                <option value="bubble_fill">Bubbles</option>
+                <option value="free_text_inpaint">Free text</option>
+                <option value="lama">LaMa</option>
+              </select>
+            </label>
+            <label className="ocr-option-field">
+              <span>Policy</span>
+              <select
+                className="field-select"
+                disabled={!autoCleanOcrText || autoCleanProvider === "algorithm"}
+                value={autoCleanProvider === "algorithm" ? "force_all_regions" : autoCleanPolicy}
+                onChange={(event) => setAutoCleanPolicy(event.target.value as CleanPolicy)}
+              >
+                <option value="safe_bubbles_only">Safe bubbles only</option>
+                <option value="force_all_regions">Force OCR text</option>
+              </select>
+            </label>
+            <label className="ocr-option-field">
+              <span>Expansion: {autoCleanMaskExpansion}px</span>
+              <input
+                disabled={!autoCleanOcrText}
+                max={12}
+                min={0}
+                onChange={(event) => setAutoCleanMaskExpansion(Number(event.target.value))}
+                type="range"
+                value={autoCleanMaskExpansion}
+              />
+            </label>
+          </div>
           {ocrError ? <p className="error-line ocr-status-line">{ocrError}</p> : null}
+          {ocrStatus ? <p className="ocr-status-line">{ocrStatus}</p> : null}
           {isOcrRunning ? <p className="ocr-status-line">Running OCR...</p> : null}
+          {microsoftTranslationMutation.error instanceof Error ? (
+            <p className="error-line ocr-status-line">{microsoftTranslationMutation.error.message}</p>
+          ) : null}
+          {microsoftTranslationMutation.isPending ? (
+            <p className="ocr-status-line">Running Microsoft translation...</p>
+          ) : null}
+          {deleteOcrResultsMutation.error instanceof Error ? (
+            <p className="error-line ocr-status-line">{deleteOcrResultsMutation.error.message}</p>
+          ) : null}
+          {deleteOcrResultsMutation.isPending ? (
+            <p className="ocr-status-line">Deleting OCR results...</p>
+          ) : null}
+          {mergeChapterPagesMutation.error instanceof Error ? (
+            <p className="error-line ocr-status-line">{mergeChapterPagesMutation.error.message}</p>
+          ) : null}
+          {removeMergedPagesMutation.error instanceof Error ? (
+            <p className="error-line ocr-status-line">{removeMergedPagesMutation.error.message}</p>
+          ) : null}
+          {mergeChapterPagesMutation.isPending ? (
+            <p className="ocr-status-line">Merging chapter pages...</p>
+          ) : null}
+          {removeMergedPagesMutation.isPending ? (
+            <p className="ocr-status-line">Removing merged pages...</p>
+          ) : null}
           <div className="text-unit-list">
             {workspace.textUnits.length === 0 ? (
               <EmptyPanel label="Run OCR to create text units" />
@@ -3833,6 +4368,7 @@ function TranslationPage() {
               ["draw", PenTool],
               ["color-picker", Pipette],
               ["clean", Eraser],
+              ["restore-clean", RefreshCw],
               ["typeset", Type],
             ]}
             activeTool={activeTool}
@@ -3906,6 +4442,30 @@ function TranslationPage() {
               <Eraser size={15} />
               Clean Text
             </button>
+            <button
+              className={activeTool === "restore-clean" ? "button secondary full-width active-command" : "button secondary full-width"}
+              disabled={deletePageEditMarkMutation.isPending || currentPageAutoCleanPatchCount === 0}
+              onClick={() => setActiveTool("restore-clean")}
+              type="button"
+            >
+              <RefreshCw size={15} />
+              Restore Clean
+            </button>
+            <label className="clean-control">
+              <span>Cleaner</span>
+              <select
+                disabled={cleanPageTextMutation.isPending}
+                onChange={(event) => setCleanProvider(event.target.value as CleanProviderId)}
+                value={cleanProvider}
+              >
+                <option value="algorithm">الخوارزمية - Recommended</option>
+                <option value="bubble_fill">Bubbles</option>
+                <option value="free_text_inpaint">Free text</option>
+                <option value="lama">LaMa</option>
+                <option value="opencv_telea">OpenCV Fast</option>
+                <option value="opencv_ns">OpenCV Smooth</option>
+              </select>
+            </label>
             <label className="clean-control">
               <span>Method</span>
               <select
@@ -4180,7 +4740,7 @@ function TextUnitCard({
         <div className="text-unit-head-actions">
           <span className={`status-chip ${statusClass(unit.sourceStatus)}`}>{unit.sourceStatus}</span>
           <button
-            className="icon-button danger"
+            className="floirs-button floirs-button--icon danger"
             disabled={isDeleting}
             title="Delete OCR result"
             type="button"
@@ -4197,6 +4757,12 @@ function TextUnitCard({
         <span>{unit.ocrProvider ?? "Manual"}</span>
         <span>Confidence: {confidence}</span>
       </div>
+      {unit.cleanStatus ? (
+        <div className="text-unit-meta">
+          <span>Clean: {unit.cleanStatus}</span>
+          {unit.cleanClassification ? <span>{unit.cleanClassification}</span> : null}
+        </div>
+      ) : null}
       <label>Source / OCR</label>
       <textarea
         value={sourceDraft}

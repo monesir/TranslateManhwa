@@ -2,4 +2,6 @@ node_modules/
 dist/
 dev-server.log
 electron-run.log
+.run/
+.venv-lama/
 *.local

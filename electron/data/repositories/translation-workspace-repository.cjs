@@ -138,13 +138,20 @@ function mapPageEditMarkRow(row) {
 }
 
 function mapPageCleanPatchRow(row) {
+  const metadata = parseJson(row.metadata_json, undefined);
   return {
     id: row.id,
     chapterId: row.chapter_id,
     pageId: row.page_id,
     kind: "clean_patch",
+    classification: row.classification ?? metadata?.classification?.kind ?? undefined,
+    cleanMode: row.mode ?? undefined,
+    cleanProvider: row.provider ?? undefined,
+    cleanSource: row.source ?? undefined,
+    confidence: row.confidence == null ? undefined : Number(row.confidence),
     method: row.method ?? "telea",
     maskExpansion: Number(row.mask_expansion ?? 4),
+    metadata,
     feather: Number(row.feather ?? 2),
     opacity: normalizeOpacity(row.opacity),
     patchUrl: row.patch_path,
@@ -155,8 +162,67 @@ function mapPageCleanPatchRow(row) {
       width: 16,
       height: 12,
     }),
+    sourceOcrRunId: row.source_ocr_run_id ?? undefined,
+    sourceTextUnitId: row.source_text_unit_id ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function offsetRegionJson(value, offsetX, offsetY) {
+  const region = normalizeRegionBox(parseJson(value, null), {
+    type: "box",
+    x: 0,
+    y: 0,
+    width: 16,
+    height: 12,
+  });
+  return JSON.stringify({
+    ...region,
+    x: roundBoxCoordinate(region.x + Number(offsetX ?? 0)),
+    y: roundBoxCoordinate(region.y + Number(offsetY ?? 0)),
+  });
+}
+
+function offsetPointsJson(value, offsetX, offsetY) {
+  return JSON.stringify(parseJson(value, []).map((point) => ({
+    ...point,
+    x: roundBoxCoordinate(Number(point.x ?? 0) + Number(offsetX ?? 0)),
+    y: roundBoxCoordinate(Number(point.y ?? 0) + Number(offsetY ?? 0)),
+  })));
+}
+
+function offsetTextUnitRowForMergedPage(row) {
+  if (!row.merged_page_id) return row;
+  const offsetX = Number(row.merge_offset_x ?? 0);
+  const offsetY = Number(row.merge_offset_y ?? 0);
+  return {
+    ...row,
+    page_id: row.merged_page_id,
+    region_json: offsetRegionJson(row.region_json, offsetX, offsetY),
+    typesetting_box_json: row.typesetting_box_json
+      ? offsetRegionJson(row.typesetting_box_json, offsetX, offsetY)
+      : row.typesetting_box_json,
+  };
+}
+
+function offsetEditMarkRowForMergedPage(row, mergeOffsetsByPage) {
+  const offset = mergeOffsetsByPage.get(row.page_id);
+  if (!offset) return row;
+  return {
+    ...row,
+    page_id: offset.mergedPageId,
+    points_json: row.points_json ? offsetPointsJson(row.points_json, offset.x, offset.y) : row.points_json,
+  };
+}
+
+function offsetCleanPatchRowForMergedPage(row, mergeOffsetsByPage) {
+  const offset = mergeOffsetsByPage.get(row.page_id);
+  if (!offset) return row;
+  return {
+    ...row,
+    page_id: offset.mergedPageId,
+    region_json: offsetRegionJson(row.region_json, offset.x, offset.y),
   };
 }
 
@@ -195,14 +261,46 @@ class TranslationWorkspaceRepository {
     `).get(chapterId);
     const totalPages = Number(pageState?.total_pages ?? 0);
     const localPages = Number(pageState?.local_pages ?? 0);
+    const mergedPageCount = Number(this.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM pages
+      WHERE chapter_id = ? AND page_kind = 'merged'
+    `).get(chapterId)?.count ?? 0);
+    const pageKindFilter = mergedPageCount > 0 ? "merged" : "original";
+    const mergeOffsets = mergedPageCount > 0
+      ? this.db.prepare(`
+          SELECT
+            merged_page_id,
+            source_page_id,
+            x,
+            y,
+            width,
+            height
+          FROM page_merge_sources
+          WHERE merged_page_id IN (
+            SELECT id FROM pages WHERE chapter_id = ? AND page_kind = 'merged'
+          )
+        `).all(chapterId)
+      : [];
+    const mergeOffsetsByPage = new Map(mergeOffsets.map((row) => [
+      row.source_page_id,
+      {
+        height: Number(row.height ?? 0),
+        mergedPageId: row.merged_page_id,
+        width: Number(row.width ?? 0),
+        x: Number(row.x ?? 0),
+        y: Number(row.y ?? 0),
+      },
+    ]));
     const pages = totalPages > 0 && totalPages === localPages
       ? this.db.prepare(`
           SELECT p.*, a.path AS asset_path, a.metadata_json AS asset_metadata_json
           FROM pages p
           JOIN assets a ON a.id = p.asset_id
           WHERE p.chapter_id = ?
+            AND COALESCE(p.page_kind, 'original') = ?
           ORDER BY p.page_index ASC
-        `).all(chapterId).map(mapPageRow)
+        `).all(chapterId, pageKindFilter).map(mapPageRow)
       : [];
 
     const textUnits = this.db.prepare(`
@@ -250,11 +348,36 @@ class TranslationWorkspaceRepository {
           WHERE ti.text_unit_id = tu.id
           ORDER BY ti.updated_at DESC
           LIMIT 1
-        ) AS typesetting_box_json
+        ) AS typesetting_box_json,
+        (
+          SELECT ca.status
+          FROM clean_attempts ca
+          WHERE ca.text_unit_id = tu.id
+          ORDER BY ca.created_at DESC
+          LIMIT 1
+        ) AS clean_status,
+        (
+          SELECT ca.classification
+          FROM clean_attempts ca
+          WHERE ca.text_unit_id = tu.id
+          ORDER BY ca.created_at DESC
+          LIMIT 1
+        ) AS clean_classification,
+        (
+          SELECT ca.error_message
+          FROM clean_attempts ca
+          WHERE ca.text_unit_id = tu.id
+          ORDER BY ca.created_at DESC
+          LIMIT 1
+        ) AS clean_reason,
+        pms.merged_page_id,
+        pms.x AS merge_offset_x,
+        pms.y AS merge_offset_y
       FROM text_units tu
+      LEFT JOIN page_merge_sources pms ON pms.source_page_id = tu.page_id
       WHERE tu.chapter_id = ?
       ORDER BY tu.unit_order ASC
-    `).all(chapterId).map(mapTextUnitRow);
+    `).all(chapterId).map((row) => mapTextUnitRow(offsetTextUnitRowForMergedPage(row)));
 
     const matches = this.db.prepare(`
       SELECT * FROM dictionary_matches
@@ -288,13 +411,17 @@ class TranslationWorkspaceRepository {
       FROM page_edit_marks
       WHERE chapter_id = ?
       ORDER BY created_at ASC, id ASC
-    `).all(chapterId).map(mapPageEditMarkRow);
+    `).all(chapterId)
+      .map((row) => offsetEditMarkRowForMergedPage(row, mergeOffsetsByPage))
+      .map(mapPageEditMarkRow);
     const pageCleanPatches = this.db.prepare(`
       SELECT *
       FROM page_clean_patches
       WHERE chapter_id = ?
       ORDER BY created_at ASC, id ASC
-    `).all(chapterId).map(mapPageCleanPatchRow);
+    `).all(chapterId)
+      .map((row) => offsetCleanPatchRowForMergedPage(row, mergeOffsetsByPage))
+      .map(mapPageCleanPatchRow);
     const pageEdits = [...pageEditMarks, ...pageCleanPatches].sort((first, second) => {
       const byDate = String(first.createdAt).localeCompare(String(second.createdAt));
       return byDate === 0 ? String(first.id).localeCompare(String(second.id)) : byDate;
@@ -461,10 +588,14 @@ class TranslationWorkspaceRepository {
         p.width AS page_width,
         p.height AS page_height,
         ti.font_size,
-        ti.box_json
+        ti.box_json,
+        pms.merged_page_id,
+        pms.x AS merge_offset_x,
+        pms.y AS merge_offset_y
       FROM text_units tu
       JOIN pages p ON p.id = tu.page_id
       LEFT JOIN typesetting_items ti ON ti.id = ?
+      LEFT JOIN page_merge_sources pms ON pms.source_page_id = tu.page_id
       WHERE tu.id = ?
     `).get(`typesetting_${textUnitId}`, textUnitId);
   }
@@ -480,9 +611,18 @@ class TranslationWorkspaceRepository {
     });
     const hasFontSize = nextInput.fontSize != null;
     const hasBox = nextInput.box != null;
+    const offsetX = row.merged_page_id ? Number(row.merge_offset_x ?? 0) : 0;
+    const offsetY = row.merged_page_id ? Number(row.merge_offset_y ?? 0) : 0;
+    const inputBox = nextInput.box && row.merged_page_id
+      ? {
+        ...nextInput.box,
+        x: Number(nextInput.box.x ?? 0) - offsetX,
+        y: Number(nextInput.box.y ?? 0) - offsetY,
+      }
+      : nextInput.box;
     return {
       box: normalizeTextBox(
-        hasBox ? nextInput.box : row.box_json,
+        hasBox ? inputBox : row.box_json,
         fallbackBox,
         row.page_width,
         row.page_height,
@@ -539,8 +679,16 @@ class TranslationWorkspaceRepository {
       throw error;
     }
 
+    const displayBox = existing.merged_page_id
+      ? {
+        ...typesetting.box,
+        x: roundBoxCoordinate(typesetting.box.x + Number(existing.merge_offset_x ?? 0)),
+        y: roundBoxCoordinate(typesetting.box.y + Number(existing.merge_offset_y ?? 0)),
+      }
+      : typesetting.box;
+
     return {
-      box: typesetting.box,
+      box: displayBox,
       chapterId: existing.chapter_id,
       fontSize: typesetting.fontSize,
       id: textUnitId,

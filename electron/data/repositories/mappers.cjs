@@ -90,14 +90,18 @@ function mapGlossaryTermRow(row) {
 }
 
 function mapPageRow(row) {
+  const pageIndex = Number(row.page_index);
+  const pageKind = row.page_kind ?? "original";
   return {
     id: row.id,
     chapterId: row.chapter_id,
-    index: Number(row.page_index),
+    index: pageKind === "merged" && pageIndex >= 100000 ? pageIndex - 100000 : pageIndex,
     imageTone: coverToneFromMetadata(row.asset_metadata_json, "night"),
     imageUrl: row.asset_path ?? null,
     width: Number(row.width ?? 820),
     height: Number(row.height ?? 1240),
+    pageKind,
+    mergedGroupId: row.merged_group_id ?? null,
   };
 }
 
@@ -143,6 +147,9 @@ function mapTextUnitRow(row) {
     reviewStatus: row.review_status,
     matchedCharacterIds: [],
     matchedGlossaryTermIds: [],
+    cleanStatus: row.clean_status ?? undefined,
+    cleanClassification: row.clean_classification ?? undefined,
+    cleanReason: row.clean_reason ?? undefined,
     typesetting: {
       box: normalizeTextUnitBox(row.typesetting_box_json, region),
       fontSize: normalizeTextUnitFontSize(row.typesetting_font_size),

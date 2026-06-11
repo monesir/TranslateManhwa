@@ -6,6 +6,8 @@ const { DictionaryRepository } = require("../data/repositories/dictionary-reposi
 const { OcrService } = require("./ocr-service.cjs");
 const { PageColorService } = require("./page-color-service.cjs");
 const { PageCleanService } = require("./page-clean-service.cjs");
+const { PageMergeService } = require("./page-merge-service.cjs");
+const { TranslationService } = require("./translation-service.cjs");
 const {
   SourceImportRepository,
   sourceChapterId,
@@ -32,6 +34,8 @@ function createAppApi(db, options = {}) {
   const ocrService = new OcrService(db, { workspacePath: options.workspacePath });
   const pageColorService = new PageColorService(db, { workspacePath: options.workspacePath });
   const pageCleanService = new PageCleanService(db, { workspacePath: options.workspacePath });
+  const pageMergeService = new PageMergeService(db, { workspacePath: options.workspacePath });
+  const translationService = new TranslationService(db);
 
   return {
     listProjects() {
@@ -98,6 +102,18 @@ function createAppApi(db, options = {}) {
       return pageCleanService.cleanText(pageId, input);
     },
 
+    translateWithMicrosoft(input) {
+      return translationService.translateMicrosoft(input);
+    },
+
+    mergeChapterPages(chapterId, input) {
+      return pageMergeService.mergeEveryTwoPages(chapterId, input);
+    },
+
+    removeMergedPages(chapterId) {
+      return pageMergeService.removeMergedPages(chapterId);
+    },
+
     listOcrProviders(languageHint) {
       return ocrService.listProviders(languageHint);
     },
@@ -116,6 +132,10 @@ function createAppApi(db, options = {}) {
 
     updateTextUnitSource(textUnitId, input) {
       return ocrService.updateTextUnitSource(textUnitId, input);
+    },
+
+    deleteOcrResults(input) {
+      return ocrService.deleteResults(input);
     },
 
     addCharacter(projectId, input) {

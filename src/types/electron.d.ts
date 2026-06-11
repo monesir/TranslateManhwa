@@ -8,6 +8,8 @@ import type {
   GlossaryTermInput,
   GlossaryTerm,
   LibraryStats,
+  MergeChapterPagesInput,
+  MergeChapterPagesResult,
   OcrProviderStatus,
   OcrRegionRunOptions,
   OcrRunOptions,
@@ -19,7 +21,10 @@ import type {
   PageEditMarkInput,
   Project,
   ProjectOverview,
+  RemoveMergedPagesResult,
   ChapterTextSizeInput,
+  DeleteOcrResultsInput,
+  DeleteOcrResultsResult,
   RegionBox,
   SourceCatalogItem,
   SourceChapterPreparationResult,
@@ -30,6 +35,8 @@ import type {
   SourceTitleSummary,
   TextUnit,
   TextUnitTypesettingInput,
+  TranslateTextUnitsInput,
+  TranslateTextUnitsResult,
   UpdateTextUnitSourceInput,
 } from "./domain";
 
@@ -56,6 +63,7 @@ interface FlorisApi {
   runOcrForRegion(pageId: string, input: OcrRegionRunOptions): Promise<OcrRunResult>;
   runOcrForChapter(chapterId: string, input: OcrRunOptions): Promise<OcrRunResult>;
   updateTextUnitSource(textUnitId: string, input: UpdateTextUnitSourceInput): Promise<TextUnit>;
+  deleteOcrResults(input: DeleteOcrResultsInput): Promise<DeleteOcrResultsResult>;
   updateFinalTranslation(textUnitId: string, text: string): Promise<TextUnit>;
   deleteTextUnit(textUnitId: string): Promise<{ chapterId: string; id: string }>;
   updateTextUnitTypesetting(
@@ -70,6 +78,9 @@ interface FlorisApi {
   deletePageEditMark(markId: string): Promise<{ chapterId: string; id: string; pageId: string }>;
   samplePageColor(pageId: string, input: PageColorSampleInput): Promise<PageColorSampleResult>;
   cleanPageText(pageId: string, input: PageCleanTextInput): Promise<PageEditMark>;
+  translateWithMicrosoft(input: TranslateTextUnitsInput): Promise<TranslateTextUnitsResult>;
+  mergeChapterPages(chapterId: string, input: MergeChapterPagesInput): Promise<MergeChapterPagesResult>;
+  removeMergedPages(chapterId: string): Promise<RemoveMergedPagesResult>;
   addCharacter(projectId: string, input: CharacterInput): Promise<Character>;
   updateCharacter(
     characterId: string,

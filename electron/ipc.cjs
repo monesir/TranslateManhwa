@@ -35,6 +35,8 @@ function registerIpcHandlers(appApi) {
       appApi.runOcrForChapter(chapterId, input),
     "ocr:updateTextUnitSource": (_event, textUnitId, input) =>
       appApi.updateTextUnitSource(textUnitId, input),
+    "ocr:deleteResults": (_event, input) =>
+      appApi.deleteOcrResults(input),
     "data:updateFinalTranslation": (_event, textUnitId, text) =>
       appApi.updateFinalTranslation(textUnitId, text),
     "data:deleteTextUnit": (_event, textUnitId) =>
@@ -51,6 +53,12 @@ function registerIpcHandlers(appApi) {
       appApi.samplePageColor(pageId, input),
     "data:cleanPageText": (_event, pageId, input) =>
       appApi.cleanPageText(pageId, input),
+    "translation:microsoft": (_event, input) =>
+      appApi.translateWithMicrosoft(input),
+    "pages:mergeChapter": (_event, chapterId, input) =>
+      appApi.mergeChapterPages(chapterId, input),
+    "pages:removeMerged": (_event, chapterId) =>
+      appApi.removeMergedPages(chapterId),
     "data:addCharacter": (_event, projectId, input) => appApi.addCharacter(projectId, input),
     "data:updateCharacter": (_event, characterId, input) =>
       appApi.updateCharacter(characterId, input),

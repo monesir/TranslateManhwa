@@ -8,6 +8,8 @@ const { COVER_CACHE_SCHEME, sanitizeFilePart } = require("../data/cover-cache.cj
 
 const execFileAsync = promisify(execFile);
 const SMART_CLEAN_SCRIPT = path.join(__dirname, "..", "ocr", "scripts", "smart-clean-text.py");
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const DEFAULT_LAMA_PYTHON = path.join(REPO_ROOT, ".venv-lama", "Scripts", "python.exe");
 
 function assertInsideWorkspace(workspacePath, candidatePath) {
   const workspaceRoot = path.resolve(workspacePath);
@@ -53,6 +55,88 @@ function normalizeMethod(value) {
   return String(value ?? "telea").toLowerCase() === "ns" ? "ns" : "telea";
 }
 
+function normalizeProvider(value, method) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (["algorithm", "bubble_fill", "free_text_inpaint", "opencv_telea", "opencv_ns", "lama", "diffusion"].includes(normalized)) {
+    return normalized;
+  }
+  return method === "ns" ? "opencv_ns" : "opencv_telea";
+}
+
+function resolveProviderPython(provider, fallbackPython) {
+  if (provider !== "lama") return fallbackPython;
+
+  const candidate = process.env.FLORIS_LAMA_PYTHON || DEFAULT_LAMA_PYTHON;
+  if (fs.existsSync(candidate)) return candidate;
+
+  throw new Error(
+    `LaMa is not installed. Expected Python at ${candidate}. ` +
+      "Create it with: python -m venv --system-site-packages .venv-lama; " +
+      ".\\.venv-lama\\Scripts\\python.exe -m pip install simple-lama-inpainting",
+  );
+}
+
+function normalizePolicy(value) {
+  const normalized = String(value ?? "force_all_regions").trim().toLowerCase();
+  if (["off", "safe_bubbles_only", "ask_on_unsafe", "force_all_regions"].includes(normalized)) {
+    return normalized;
+  }
+  return "force_all_regions";
+}
+
+function normalizeMode(value) {
+  const normalized = String(value ?? "manual_selection").trim().toLowerCase();
+  if (["auto_after_ocr", "manual_selection", "retry"].includes(normalized)) return normalized;
+  return "manual_selection";
+}
+
+function normalizeSource(value) {
+  const normalized = String(value ?? "manual_clean").trim().toLowerCase();
+  if (["ocr_page", "ocr_region", "ocr_chapter", "manual_clean"].includes(normalized)) return normalized;
+  return "manual_clean";
+}
+
+function cleanAttemptId() {
+  return `clean_attempt_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function safeJson(value, fallback = null) {
+  if (value == null) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function safeString(value, fallback = null) {
+  const normalized = String(value ?? "").trim();
+  return normalized || fallback;
+}
+
+function isSafeBubbleClassification(classification, policy) {
+  if (policy === "force_all_regions") return true;
+  if (policy === "off") return false;
+  const safeKinds = new Set(["white_bubble", "black_bubble", "flat_light_box", "flat_dark_box"]);
+  return safeKinds.has(classification?.kind) && Number(classification?.confidence ?? 0) >= 0.72;
+}
+
+function isBubbleLikeClassification(classification) {
+  const bubbleKinds = new Set(["white_bubble", "black_bubble", "flat_light_box", "flat_dark_box"]);
+  return bubbleKinds.has(classification?.kind);
+}
+
+function resolveEffectiveProvider(provider, classification) {
+  if (provider !== "algorithm") return provider;
+  return isBubbleLikeClassification(classification) ? "free_text_inpaint" : "lama";
+}
+
+function shouldSkipClean(provider, classification, policy) {
+  if (policy === "off") return true;
+  if (provider === "algorithm") return false;
+  return !isSafeBubbleClassification(classification, policy);
+}
+
 function normalizeRegion(region, page) {
   const pageWidth = Number(page.width ?? 820);
   const pageHeight = Number(page.height ?? 1240);
@@ -76,13 +160,20 @@ function normalizeRegion(region, page) {
 }
 
 function mapCleanPatchRow(row) {
+  const metadata = safeJson(row.metadata_json, undefined);
   return {
     id: row.id,
     chapterId: row.chapter_id,
     pageId: row.page_id,
     kind: "clean_patch",
+    classification: row.classification ?? metadata?.classification?.kind ?? undefined,
+    cleanMode: row.mode ?? undefined,
+    cleanProvider: row.provider ?? undefined,
+    cleanSource: row.source ?? undefined,
+    confidence: row.confidence == null ? undefined : Number(row.confidence),
     method: row.method,
     maskExpansion: Number(row.mask_expansion ?? 4),
+    metadata,
     feather: Number(row.feather ?? 2),
     opacity: Number(row.opacity ?? 1),
     patchUrl: row.patch_path,
@@ -166,14 +257,150 @@ class PageCleanService {
       .filter(Boolean);
   }
 
+  insertCleanAttempt({
+    page,
+    region,
+    mode,
+    provider,
+    policy,
+    sourceTextUnitId,
+    sourceOcrRunId,
+    classification,
+    status,
+    patchId = null,
+    errorMessage = null,
+    timestamp,
+  }) {
+    const metrics = classification?.metrics ?? {};
+    this.db.prepare(`
+      INSERT INTO clean_attempts (
+        id, chapter_id, page_id, text_unit_id, ocr_run_id, mode, provider,
+        policy, region_json, classification, confidence, status, patch_id,
+        error_message, metrics_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      cleanAttemptId(),
+      page.chapterId,
+      page.pageId,
+      sourceTextUnitId ?? null,
+      sourceOcrRunId ?? null,
+      mode,
+      provider,
+      policy,
+      JSON.stringify(region),
+      classification?.kind ?? null,
+      classification?.confidence ?? null,
+      status,
+      patchId,
+      errorMessage,
+      JSON.stringify(metrics),
+      timestamp,
+      timestamp,
+    );
+  }
+
+  async classifyRegion(pageId, input) {
+    const page = this.getPage(pageId);
+    const region = normalizeRegion(input?.region, page);
+    const outputPath = assertInsideWorkspace(
+      this.workspacePath,
+      path.join(this.workspacePath, ".tmp", `clean_classify_${Date.now()}_${Math.random().toString(16).slice(2)}.png`),
+    );
+    await fsp.mkdir(path.dirname(outputPath), { recursive: true });
+    const existingPatches = this.existingCleanPatches(page.pageId);
+    const manifestPath = existingPatches.length > 0 ? `${outputPath}.patches.json` : "";
+    if (manifestPath) {
+      await fsp.writeFile(manifestPath, JSON.stringify(existingPatches), "utf8");
+    }
+
+    let result;
+    try {
+      result = await execFileAsync(
+        this.pythonCommand,
+        [
+          SMART_CLEAN_SCRIPT,
+          page.imagePath,
+          outputPath,
+          String(region.x),
+          String(region.y),
+          String(region.width),
+          String(region.height),
+          String(page.width),
+          String(page.height),
+          String(input?.maskExpansion ?? 2),
+          "0",
+          "telea",
+          manifestPath,
+          "classify",
+        ],
+        {
+          maxBuffer: 1024 * 1024,
+          windowsHide: true,
+        },
+      );
+    } finally {
+      await removeIfExists(outputPath);
+      await removeIfExists(manifestPath);
+    }
+    const metadata = safeJson(String(result.stdout || "{}"), {});
+    return metadata.classification ?? {
+      kind: "unknown",
+      confidence: 0,
+      metrics: {},
+      reason: "Classifier returned no result.",
+    };
+  }
+
   async cleanText(pageId, input) {
     const page = this.getPage(pageId);
     const region = normalizeRegion(input?.region, page);
+    const maskRegion = input?.maskRegion ? normalizeRegion(input.maskRegion, page) : null;
     const method = normalizeMethod(input?.method);
+    const provider = normalizeProvider(input?.provider, method);
+    const policy = normalizePolicy(input?.policy);
+    const mode = normalizeMode(input?.mode);
+    const source = normalizeSource(input?.source);
+    const sourceTextUnitId = safeString(input?.sourceTextUnitId);
+    const sourceOcrRunId = safeString(input?.sourceOcrRunId);
     const maskExpansion = Math.round(clamp(Number(input?.maskExpansion ?? 4), 0, 18));
     const feather = Math.round(clamp(Number(input?.feather ?? 2), 0, 16));
     const id = cleanPatchId();
     const timestamp = new Date().toISOString();
+
+    const classificationRegion = maskRegion ?? region;
+    const classification = await this.classifyRegion(pageId, { maskExpansion, region: classificationRegion });
+    const effectiveProvider = resolveEffectiveProvider(provider, classification);
+    if (shouldSkipClean(provider, classification, policy)) {
+      this.insertCleanAttempt({
+        classification,
+        mode,
+        page,
+        policy,
+        provider,
+        region,
+        sourceOcrRunId,
+        sourceTextUnitId,
+        status: "skipped",
+        timestamp,
+      });
+      return {
+        chapterId: page.chapterId,
+        classification: classification.kind,
+        confidence: classification.confidence,
+        id: cleanAttemptId(),
+        kind: "clean_patch",
+        metadata: {
+          classification,
+          skipped: true,
+          reason: classification.reason,
+        },
+        pageId: page.pageId,
+        region,
+        skipped: true,
+        status: "skipped",
+      };
+    }
+
     const relativePath = path
       .join(
         "projects",
@@ -197,8 +424,9 @@ class PageCleanService {
 
     let stdout = "";
     try {
+      const providerPython = resolveProviderPython(effectiveProvider, this.pythonCommand);
       const result = await execFileAsync(
-        this.pythonCommand,
+        providerPython,
         [
           SMART_CLEAN_SCRIPT,
           page.imagePath,
@@ -212,7 +440,13 @@ class PageCleanService {
           String(maskExpansion),
           String(feather),
           method,
-          ...(manifestPath ? [manifestPath] : []),
+          manifestPath,
+          effectiveProvider,
+          policy,
+          maskRegion ? String(maskRegion.x) : "",
+          maskRegion ? String(maskRegion.y) : "",
+          maskRegion ? String(maskRegion.width) : "",
+          maskRegion ? String(maskRegion.height) : "",
         ],
         {
           maxBuffer: 1024 * 1024,
@@ -231,6 +465,10 @@ class PageCleanService {
       metadata = {};
     }
     metadata.existingPatchCount = existingPatches.length;
+    metadata.classification = metadata.classification ?? classification;
+    metadata.requestedProvider = provider;
+    metadata.effectiveProvider = effectiveProvider;
+    if (maskRegion) metadata.maskRegion = maskRegion;
 
     await fsp.stat(outputPath);
 
@@ -239,8 +477,10 @@ class PageCleanService {
       this.db.prepare(`
         INSERT INTO page_clean_patches (
           id, chapter_id, page_id, region_json, patch_path, method,
-          mask_expansion, feather, opacity, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          mask_expansion, feather, opacity, provider, mode, source,
+          source_text_unit_id, source_ocr_run_id, classification, confidence,
+          status, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         page.chapterId,
@@ -251,9 +491,31 @@ class PageCleanService {
         maskExpansion,
         feather,
         1,
+        provider,
+        mode,
+        source,
+        sourceTextUnitId,
+        sourceOcrRunId,
+        metadata.classification?.kind ?? classification.kind ?? null,
+        metadata.classification?.confidence ?? classification.confidence ?? null,
+        "applied",
+        JSON.stringify(metadata),
         timestamp,
         timestamp,
       );
+      this.insertCleanAttempt({
+        classification: metadata.classification ?? classification,
+        mode,
+        page,
+        patchId: id,
+        policy,
+        provider,
+        region,
+        sourceOcrRunId,
+        sourceTextUnitId,
+        status: "applied",
+        timestamp,
+      });
       this.db.prepare("UPDATE chapters SET updated_at = ? WHERE id = ?").run(timestamp, page.chapterId);
       this.db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(timestamp, page.projectId);
       this.db.exec("COMMIT");
@@ -271,6 +533,12 @@ class PageCleanService {
         patch_path: patchUrl,
         method,
         mask_expansion: maskExpansion,
+        metadata_json: JSON.stringify(metadata),
+        mode,
+        provider,
+        source,
+        classification: metadata.classification?.kind ?? classification.kind ?? null,
+        confidence: metadata.classification?.confidence ?? classification.confidence ?? null,
         feather,
         opacity: 1,
         created_at: timestamp,

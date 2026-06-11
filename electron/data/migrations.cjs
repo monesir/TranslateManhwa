@@ -480,6 +480,161 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 7,
+    name: "henry_viii_clean_translation_merge_foundation",
+    up(db) {
+      const addColumnIfMissing = (table, column, definition) => {
+        const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+        if (!columns.some((item) => item.name === column)) {
+          db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+        }
+      };
+
+      addColumnIfMissing("page_clean_patches", "provider", "TEXT");
+      addColumnIfMissing("page_clean_patches", "mode", "TEXT");
+      addColumnIfMissing("page_clean_patches", "source", "TEXT");
+      addColumnIfMissing("page_clean_patches", "source_text_unit_id", "TEXT");
+      addColumnIfMissing("page_clean_patches", "source_ocr_run_id", "TEXT");
+      addColumnIfMissing("page_clean_patches", "classification", "TEXT");
+      addColumnIfMissing("page_clean_patches", "confidence", "REAL");
+      addColumnIfMissing("page_clean_patches", "status", "TEXT NOT NULL DEFAULT 'applied'");
+      addColumnIfMissing("page_clean_patches", "metadata_json", "TEXT");
+      addColumnIfMissing("translation_candidates", "metadata_json", "TEXT");
+      addColumnIfMissing("pages", "page_kind", "TEXT NOT NULL DEFAULT 'original'");
+      addColumnIfMissing("pages", "merged_group_id", "TEXT");
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS clean_attempts (
+          id TEXT PRIMARY KEY,
+          chapter_id TEXT NOT NULL,
+          page_id TEXT NOT NULL,
+          text_unit_id TEXT,
+          ocr_run_id TEXT,
+          mode TEXT NOT NULL,
+          provider TEXT,
+          policy TEXT NOT NULL,
+          region_json TEXT NOT NULL,
+          classification TEXT,
+          confidence REAL,
+          status TEXT NOT NULL,
+          patch_id TEXT,
+          error_message TEXT,
+          metrics_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+          FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE,
+          FOREIGN KEY (text_unit_id) REFERENCES text_units(id) ON DELETE SET NULL,
+          FOREIGN KEY (ocr_run_id) REFERENCES ocr_runs(id) ON DELETE SET NULL,
+          FOREIGN KEY (patch_id) REFERENCES page_clean_patches(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_clean_attempts_chapter_page
+          ON clean_attempts(chapter_id, page_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_clean_attempts_text_unit
+          ON clean_attempts(text_unit_id);
+        CREATE INDEX IF NOT EXISTS idx_clean_attempts_ocr_run
+          ON clean_attempts(ocr_run_id);
+
+        CREATE TABLE IF NOT EXISTS page_merge_sources (
+          id TEXT PRIMARY KEY,
+          merged_page_id TEXT NOT NULL,
+          source_page_id TEXT NOT NULL,
+          source_page_index INTEGER NOT NULL,
+          x REAL NOT NULL,
+          y REAL NOT NULL,
+          width REAL NOT NULL,
+          height REAL NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (merged_page_id) REFERENCES pages(id) ON DELETE CASCADE,
+          FOREIGN KEY (source_page_id) REFERENCES pages(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_page_merge_sources_merged
+          ON page_merge_sources(merged_page_id, source_page_index);
+        CREATE INDEX IF NOT EXISTS idx_pages_chapter_kind
+          ON pages(chapter_id, page_kind, page_index);
+      `);
+    },
+  },
+  {
+    version: 8,
+    name: "henry_viii_foundation_repair",
+    up(db) {
+      const addColumnIfMissing = (table, column, definition) => {
+        const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+        if (!columns.some((item) => item.name === column)) {
+          db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+        }
+      };
+
+      addColumnIfMissing("page_clean_patches", "provider", "TEXT");
+      addColumnIfMissing("page_clean_patches", "mode", "TEXT");
+      addColumnIfMissing("page_clean_patches", "source", "TEXT");
+      addColumnIfMissing("page_clean_patches", "source_text_unit_id", "TEXT");
+      addColumnIfMissing("page_clean_patches", "source_ocr_run_id", "TEXT");
+      addColumnIfMissing("page_clean_patches", "classification", "TEXT");
+      addColumnIfMissing("page_clean_patches", "confidence", "REAL");
+      addColumnIfMissing("page_clean_patches", "status", "TEXT NOT NULL DEFAULT 'applied'");
+      addColumnIfMissing("page_clean_patches", "metadata_json", "TEXT");
+      addColumnIfMissing("translation_candidates", "metadata_json", "TEXT");
+      addColumnIfMissing("pages", "page_kind", "TEXT NOT NULL DEFAULT 'original'");
+      addColumnIfMissing("pages", "merged_group_id", "TEXT");
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS clean_attempts (
+          id TEXT PRIMARY KEY,
+          chapter_id TEXT NOT NULL,
+          page_id TEXT NOT NULL,
+          text_unit_id TEXT,
+          ocr_run_id TEXT,
+          mode TEXT NOT NULL,
+          provider TEXT,
+          policy TEXT NOT NULL,
+          region_json TEXT NOT NULL,
+          classification TEXT,
+          confidence REAL,
+          status TEXT NOT NULL,
+          patch_id TEXT,
+          error_message TEXT,
+          metrics_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+          FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE,
+          FOREIGN KEY (text_unit_id) REFERENCES text_units(id) ON DELETE SET NULL,
+          FOREIGN KEY (ocr_run_id) REFERENCES ocr_runs(id) ON DELETE SET NULL,
+          FOREIGN KEY (patch_id) REFERENCES page_clean_patches(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS page_merge_sources (
+          id TEXT PRIMARY KEY,
+          merged_page_id TEXT NOT NULL,
+          source_page_id TEXT NOT NULL,
+          source_page_index INTEGER NOT NULL,
+          x REAL NOT NULL,
+          y REAL NOT NULL,
+          width REAL NOT NULL,
+          height REAL NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (merged_page_id) REFERENCES pages(id) ON DELETE CASCADE,
+          FOREIGN KEY (source_page_id) REFERENCES pages(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_clean_attempts_chapter_page
+          ON clean_attempts(chapter_id, page_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_clean_attempts_text_unit
+          ON clean_attempts(text_unit_id);
+        CREATE INDEX IF NOT EXISTS idx_clean_attempts_ocr_run
+          ON clean_attempts(ocr_run_id);
+        CREATE INDEX IF NOT EXISTS idx_page_merge_sources_merged
+          ON page_merge_sources(merged_page_id, source_page_index);
+        CREATE INDEX IF NOT EXISTS idx_pages_chapter_kind
+          ON pages(chapter_id, page_kind, page_index);
+      `);
+    },
+  },
 ];
 
 function ensureMigrationTable(db) {

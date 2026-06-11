@@ -5,10 +5,10 @@
   background: #000000;
   color: #e6e1d8;
   --bg: #000000;
-  --panel: #171d22;
-  --panel-2: #1d252b;
-  --panel-3: #232c32;
-  --line: #333333;
+  --panel: #0d0d0d;
+  --panel-2: #161616;
+  --panel-3: #1a1a1a;
+  --line: #232323;
   --line-soft: rgba(255, 255, 255, 0.07);
   --text: #e6e1d8;
   --muted: #99a3aa;
@@ -1053,9 +1053,53 @@ h3 {
 .subtabs button.active,
 .page-switcher button.active,
 .viewer-mode-controls button.active {
-  border-color: #6b552a;
-  background: #2b2518;
-  color: #f0c66d;
+  border-color: rgba(255, 255, 255, 0.4);
+  background: #2a2a2a;
+  color: #fff;
+}
+
+/* Unified Segmented Tabs (Page Switcher & Source Strip) */
+.page-switcher,
+.source-strip {
+  display: inline-flex !important;
+  align-items: center;
+  background: transparent !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  border-radius: 8px !important;
+  padding: 0 !important;
+  gap: 0 !important;
+  overflow: hidden;
+}
+
+.page-switcher button,
+.source-strip button {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  color: #888 !important;
+  margin: 0 !important;
+  height: 34px;
+  padding: 0 16px !important;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.page-switcher button:not(:last-child),
+.source-strip button:not(:last-child) {
+  border-right: 1px solid rgba(255, 255, 255, 0.3) !important;
+}
+
+.page-switcher button:hover,
+.source-strip button:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #ddd !important;
+}
+
+.page-switcher button.active,
+.source-tab.active {
+  background: rgba(255, 255, 255, 0.15) !important;
+  color: #fff !important;
+  border: none !important;
 }
 
 .explorer-status-line {
@@ -1077,15 +1121,18 @@ h3 {
 }
 
 .tag-row span,
-.category-row span {
+.category-row span,
+.category-tag {
   display: inline-flex;
   align-items: center;
   height: 24px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: #263138;
-  color: #bdc7cc;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
   font-size: 12px;
+  font-weight: 500;
 }
 
 .series-card-head {
@@ -1151,6 +1198,9 @@ h3 {
 
 .table-card {
   padding: 16px;
+  background: #161616;
+  border: 1px solid #232323;
+  border-radius: 12px;
 }
 
 .table-title {
@@ -1174,9 +1224,9 @@ h3 {
   gap: 10px;
   min-height: 48px;
   padding: 8px 10px;
-  border: 1px solid var(--line-soft);
+  border: 1px solid #222;
   border-radius: 8px;
-  background: #151c21;
+  background: rgba(255, 255, 255, 0.02);
   color: var(--muted);
   font-size: 13px;
 }
@@ -1192,8 +1242,8 @@ h3 {
 }
 
 .chapter-row-button:hover:not(:disabled) {
-  border-color: #5b6970;
-  background: #1a2228;
+  border-color: #333;
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text);
 }
 
@@ -1288,15 +1338,29 @@ h3 {
 .dictionary-head,
 .dictionary-row {
   display: grid;
-  gap: 10px;
-  align-items: center;
+  align-items: stretch;
   min-height: 42px;
+}
+
+.dictionary-head > *,
+.dictionary-row > * {
   padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  border-right: 1px solid #232323;
+  min-width: 0;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+.dictionary-head > *:last-child,
+.dictionary-row > *:last-child {
+  border-right: none;
 }
 
 .characters-table .dictionary-head,
 .characters-table .dictionary-row {
-  grid-template-columns: 1fr 1fr 92px 1.35fr 1.4fr 86px;
+  grid-template-columns: 1fr 1fr 115px 1.35fr 1.4fr 86px;
 }
 
 .terms-table .dictionary-head,
@@ -1305,17 +1369,27 @@ h3 {
 }
 
 .dictionary-head {
-  color: var(--muted);
-  font-size: 12px;
+  border-bottom: 1px solid #232323;
+  color: #888888;
+  font-size: 0.75rem;
+  font-weight: 700;
   text-transform: uppercase;
+  background: #1a1a1a;
+  letter-spacing: 0.05em;
 }
 
 .dictionary-row {
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: #151c21;
+  border: none;
+  border-bottom: 1px solid rgba(240, 230, 210, 0.1);
+  border-radius: 0;
+  background: transparent;
   color: var(--muted);
   font-size: 13px;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+.dictionary-row:hover {
+  background-color: rgba(240, 230, 210, 0.03);
+  transform: translateX(4px);
 }
 
 .dictionary-row strong {
@@ -1334,23 +1408,52 @@ h3 {
   justify-content: flex-end;
 }
 
+.row-actions .floirs-button {
+  background: transparent;
+  border-color: transparent;
+  color: #888;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.row-actions .floirs-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.row-actions .floirs-button.danger:hover {
+  background: rgba(255, 107, 107, 0.1);
+  color: #ff6b6b;
+}
+
 .form-actions.end {
   justify-content: flex-end;
 }
 
-.icon-button.danger {
+.floirs-button.danger {
   border-color: rgba(209, 100, 100, 0.42);
   color: #e48686;
 }
 
+.floirs-button.danger:hover {
+  background: rgba(209, 100, 100, 0.1);
+  border-color: rgba(209, 100, 100, 0.6);
+  color: #ff9999;
+}
+
 .dictionary-editor {
   display: grid;
-  gap: 12px;
-  margin-bottom: 14px;
-  padding: 14px;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: #11181d;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 24px;
+  border: 1px solid #232323;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .editor-grid {
@@ -1381,11 +1484,20 @@ h3 {
 .field-select,
 .alias-row input {
   width: 100%;
-  border: 1px solid var(--line);
+  border: 1px solid #333;
   border-radius: 8px;
   background: #1a1a1a;
   color: var(--text);
   outline: 0;
+  transition: border-color 0.2s ease;
+}
+
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus,
+.field-select:focus,
+.alias-row input:focus {
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .form-field input,
@@ -1851,7 +1963,8 @@ h3 {
 
 .edit-drawing-layer.is-drawing,
 .edit-drawing-layer.is-color-picking,
-.edit-drawing-layer.is-cleaning {
+.edit-drawing-layer.is-cleaning,
+.edit-drawing-layer.is-restoring-clean {
   pointer-events: auto;
 }
 
@@ -1867,6 +1980,10 @@ h3 {
   cursor: crosshair;
 }
 
+.edit-drawing-layer.is-restoring-clean {
+  cursor: pointer;
+}
+
 .page-pointer-hitbox {
   fill: transparent;
   pointer-events: all;
@@ -1874,6 +1991,19 @@ h3 {
 
 .clean-patch-image {
   pointer-events: none;
+}
+
+.restore-clean-target {
+  fill: rgba(217, 164, 65, 0.12);
+  stroke: #f0c66d;
+  stroke-dasharray: 10 7;
+  stroke-width: 4;
+  pointer-events: all;
+}
+
+.restore-clean-target:hover {
+  fill: rgba(217, 96, 65, 0.18);
+  stroke: #ff9a76;
 }
 
 .edit-mark-path.preview {
@@ -3094,4 +3224,40 @@ h3 {
   font-size: 0.8rem;
   color: var(--color-text-secondary, #a0a0a0);
   font-weight: 500;
+}
+
+.edit-context-btn {
+  background: transparent;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease;
+}
+.edit-context-btn:hover {
+  color: #fff;
+}
+
+.status-chip {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.status-chip--default { background: #333; color: #fff; }
+
+.project-chapters-table .series-detail__table-head,
+.project-chapters-table .series-detail__table-row {
+  grid-template-columns: minmax(0, 1fr) 280px;
+}
+.project-chapters-table .series-detail__table-row {
+  border-bottom: 1px solid rgba(240, 230, 210, 0.1);
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+.project-chapters-table .series-detail__table-row:hover {
+  background-color: rgba(240, 230, 210, 0.03);
+  transform: translateX(4px);
 }
