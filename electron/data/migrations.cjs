@@ -635,6 +635,62 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 9,
+    name: "text_composition_foundation",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS text_style_presets (
+          id TEXT PRIMARY KEY,
+          project_id TEXT,
+          name TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          style_json TEXT NOT NULL,
+          layout_json TEXT NOT NULL,
+          effect_json TEXT,
+          is_default INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS text_compositions (
+          id TEXT PRIMARY KEY,
+          chapter_id TEXT NOT NULL,
+          page_id TEXT NOT NULL,
+          text_unit_id TEXT,
+          preset_id TEXT,
+          kind TEXT NOT NULL DEFAULT 'dialogue',
+          plain_text TEXT NOT NULL,
+          content_json TEXT,
+          source TEXT NOT NULL DEFAULT 'auto',
+          box_json TEXT NOT NULL,
+          style_json TEXT NOT NULL,
+          layout_json TEXT NOT NULL,
+          effect_json TEXT,
+          manual_fields_json TEXT NOT NULL DEFAULT '[]',
+          origin_json TEXT,
+          render_order INTEGER NOT NULL DEFAULT 0,
+          is_locked INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+          FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE,
+          FOREIGN KEY (text_unit_id) REFERENCES text_units(id) ON DELETE SET NULL,
+          FOREIGN KEY (preset_id) REFERENCES text_style_presets(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_text_style_presets_project
+          ON text_style_presets(project_id, kind, is_default);
+        CREATE INDEX IF NOT EXISTS idx_text_compositions_chapter
+          ON text_compositions(chapter_id, render_order);
+        CREATE INDEX IF NOT EXISTS idx_text_compositions_page
+          ON text_compositions(page_id, render_order);
+        CREATE INDEX IF NOT EXISTS idx_text_compositions_text_unit
+          ON text_compositions(text_unit_id);
+      `);
+    },
+  },
 ];
 
 function ensureMigrationTable(db) {

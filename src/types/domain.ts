@@ -1,3 +1,5 @@
+import type { TextComposition } from "../text-composition/types";
+
 export type ProjectStatus = "Active" | "Paused" | "Completed" | "Archived";
 
 export type ChapterStatus = "Not Started" | "In Progress" | "Completed";
@@ -351,6 +353,7 @@ export interface ChapterTranslationWorkspace {
   chapter: Chapter;
   pages: Page[];
   pageEditMarks: PageEditMark[];
+  textCompositions: TextComposition[];
   textUnits: TextUnit[];
   characters: Character[];
   glossaryTerms: GlossaryTerm[];

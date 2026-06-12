@@ -385,6 +385,7 @@ export async function getChapterForTranslation(
     chapter,
     pages: chapterPages,
     pageEditMarks: mutablePageEditMarks.filter((mark) => mark.chapterId === chapterId),
+    textCompositions: [],
     textUnits: mutableTextUnits.filter((unit) => unit.chapterId === chapterId),
     characters: mutableCharacters.filter((character) => character.projectId === project.id),
     glossaryTerms: mutableGlossaryTerms.filter((term) => term.projectId === project.id),

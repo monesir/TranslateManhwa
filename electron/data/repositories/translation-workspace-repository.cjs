@@ -6,6 +6,7 @@ const {
 } = require("./mappers.cjs");
 const { ChapterRepository } = require("./chapter-repository.cjs");
 const { DictionaryRepository } = require("./dictionary-repository.cjs");
+const { TextCompositionRepository } = require("./text-composition-repository.cjs");
 
 const DEFAULT_TEXT_UNIT_FONT_SIZE = 18;
 const MIN_TEXT_UNIT_FONT_SIZE = 8;
@@ -241,6 +242,7 @@ class TranslationWorkspaceRepository {
     this.db = db;
     this.chapterRepository = new ChapterRepository(db);
     this.dictionaryRepository = new DictionaryRepository(db);
+    this.textCompositionRepository = new TextCompositionRepository(db);
   }
 
   getChapterForTranslation(chapterId) {
@@ -422,6 +424,9 @@ class TranslationWorkspaceRepository {
         matchedGlossaryTermIds: matchSet?.terms ?? [],
       };
     });
+    const textCompositions = this.textCompositionRepository.listChapterCompositions(chapterId, {
+      mergeOffsetsByPage,
+    });
 
     const pageEditMarks = this.db.prepare(`
       SELECT *
@@ -451,6 +456,7 @@ class TranslationWorkspaceRepository {
       chapter,
       pages,
       pageEditMarks: pageEdits,
+      textCompositions,
       textUnits: hydratedTextUnits,
       characters: dictionary.characters,
       glossaryTerms: dictionary.glossaryTerms,
