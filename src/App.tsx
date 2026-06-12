@@ -63,6 +63,7 @@ import {
 } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ReaderPage } from "./pages/ReaderPage";
+import { TextCompositionLayer } from "./text-composition/TextCompositionLayer";
 import {
   addPageEditMark,
   addCharacter,
@@ -368,6 +369,7 @@ const SINGLE_WORD_AUTO_PASTE_MAX_EXTRA = 8;
 const TYPESET_VISUAL_SIZE_FACTOR = 1.72;
 const TYPESET_FORCE_SCALE = 1.85;
 const TYPESET_RENDER_SCALE = 2.35;
+const ENABLE_TEXT_COMPOSITIONS = false;
 const MIN_BRUSH_SIZE = 2;
 const MAX_BRUSH_SIZE = 96;
 const DEFAULT_BRUSH_SIZE = 34;
@@ -4760,66 +4762,75 @@ function TranslationPage() {
       </svg>
     </div>
   );
-  const renderEditPageSurface = (page: Page, units: TextUnit[], marks: PageEditMark[], surfaceClassName = "") => (
-    <div
-      className={`mock-page edit-page-surface page-tone-${page.imageTone} ${
-        activeTool === "color-picker" ? "is-color-picking" : ""
-      } ${surfaceClassName}`.trim()}
-      data-page-id={page.id}
-      onPointerDown={(event) => {
-        if (activeTool === "color-picker") void pickColorFromPage(event, page);
-      }}
-      style={pageSurfaceStyle(page)}
-    >
-      {renderPageArtwork(page)}
-      {renderDrawingLayer(page, marks)}
-      <div className={activeTool === "draw" || activeTool === "color-picker" || activeTool === "clean" || activeTool === "restore-clean" || activeTool === "restore-area" ? "edit-work-layer is-passive" : "edit-work-layer"}>
-        {units.map((unit) => {
-          const label = getOverlayText(unit);
-          const isSelected = unit.id === selectedTextUnit?.id;
-          if (!label && !isSelected) return null;
-          return (
-            <div className="edit-text-item" key={unit.id}>
-              <button
-                className={isSelected ? "edit-text-region selected" : "edit-text-region"}
-                onClick={() => selectTextUnit(unit)}
-                onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "move")}
-                style={editRegionStyle(unit)}
-                title={unit.sourceText}
-                type="button"
-              >
-                <span className="edit-text-content" dir="auto">{label}</span>
-                {isSelected ? (
-                  <>
-                    <span
-                      aria-hidden="true"
-                      className="text-box-resize-handle handle-nw"
-                      onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "resize-nw")}
-                    />
-                    <span
-                      aria-hidden="true"
-                      className="text-box-resize-handle handle-ne"
-                      onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "resize-ne")}
-                    />
-                    <span
-                      aria-hidden="true"
-                      className="text-box-resize-handle handle-sw"
-                      onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "resize-sw")}
-                    />
-                    <span
-                      aria-hidden="true"
-                      className="text-box-resize-handle handle-se"
-                      onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "resize-se")}
-                    />
-                  </>
-                ) : null}
-              </button>
-            </div>
-          );
-        })}
+  const renderEditPageSurface = (page: Page, units: TextUnit[], marks: PageEditMark[], surfaceClassName = "") => {
+    const pageTextCompositions = workspace.textCompositions.filter((composition) => composition.pageId === page.id);
+    const shouldRenderCompositions = ENABLE_TEXT_COMPOSITIONS && pageTextCompositions.length > 0;
+
+    return (
+      <div
+        className={`mock-page edit-page-surface page-tone-${page.imageTone} ${
+          activeTool === "color-picker" ? "is-color-picking" : ""
+        } ${surfaceClassName}`.trim()}
+        data-page-id={page.id}
+        onPointerDown={(event) => {
+          if (activeTool === "color-picker") void pickColorFromPage(event, page);
+        }}
+        style={pageSurfaceStyle(page)}
+      >
+        {renderPageArtwork(page)}
+        {renderDrawingLayer(page, marks)}
+        <div className={activeTool === "draw" || activeTool === "color-picker" || activeTool === "clean" || activeTool === "restore-clean" || activeTool === "restore-area" ? "edit-work-layer is-passive" : "edit-work-layer"}>
+          {shouldRenderCompositions ? (
+            <TextCompositionLayer compositions={pageTextCompositions} page={page} zoom={zoom} />
+          ) : (
+            units.map((unit) => {
+              const label = getOverlayText(unit);
+              const isSelected = unit.id === selectedTextUnit?.id;
+              if (!label && !isSelected) return null;
+              return (
+                <div className="edit-text-item" key={unit.id}>
+                  <button
+                    className={isSelected ? "edit-text-region selected" : "edit-text-region"}
+                    onClick={() => selectTextUnit(unit)}
+                    onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "move")}
+                    style={editRegionStyle(unit)}
+                    title={unit.sourceText}
+                    type="button"
+                  >
+                    <span className="edit-text-content" dir="auto">{label}</span>
+                    {isSelected ? (
+                      <>
+                        <span
+                          aria-hidden="true"
+                          className="text-box-resize-handle handle-nw"
+                          onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "resize-nw")}
+                        />
+                        <span
+                          aria-hidden="true"
+                          className="text-box-resize-handle handle-ne"
+                          onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "resize-ne")}
+                        />
+                        <span
+                          aria-hidden="true"
+                          className="text-box-resize-handle handle-sw"
+                          onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "resize-sw")}
+                        />
+                        <span
+                          aria-hidden="true"
+                          className="text-box-resize-handle handle-se"
+                          onPointerDown={(event) => beginTextBoxTransform(event, unit, page, "resize-se")}
+                        />
+                      </>
+                    ) : null}
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <section

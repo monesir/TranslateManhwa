@@ -2131,6 +2131,31 @@ h3 {
   box-shadow: 0 0 0 2px rgba(217, 164, 65, 0.24);
 }
 
+.text-composition-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.text-composition-item {
+  position: absolute;
+  display: flex;
+  pointer-events: none;
+  user-select: none;
+}
+
+.text-composition-content {
+  display: block;
+  width: 100%;
+  overflow: visible;
+  white-space: pre-wrap;
+}
+
+.text-composition-span {
+  white-space: pre-wrap;
+}
+
 .text-box-resize-handle {
   position: absolute;
   z-index: 3;
