@@ -1,4 +1,10 @@
-import type { TextComposition } from "../text-composition/types";
+import type {
+  TextComposition,
+  TextCompositionKind,
+  TextCompositionManualField,
+  TextCompositionOrigin,
+  TextCompositionSource,
+} from "../text-composition/types";
 
 export type ProjectStatus = "Active" | "Paused" | "Completed" | "Archived";
 
@@ -431,7 +437,18 @@ export interface UpdateTextUnitSourceInput {
 export interface TextUnitTypesettingInput {
   box?: RegionBox;
   color?: string;
+  composition?: TextUnitTypesettingCompositionInput;
   fontSize?: number;
+}
+
+export interface TextUnitTypesettingCompositionInput {
+  enabled?: boolean;
+  kind?: TextCompositionKind;
+  manualFields?: TextCompositionManualField[];
+  origin?: TextCompositionOrigin | null;
+  plainText: string;
+  presetId?: string | null;
+  source?: TextCompositionSource;
 }
 
 export interface ChapterTextSizeInput {

@@ -13,6 +13,10 @@ const MIN_TEXT_UNIT_FONT_SIZE = 8;
 const MAX_TEXT_UNIT_FONT_SIZE = 360;
 const MIN_TEXT_BOX_WIDTH = 16;
 const MIN_TEXT_BOX_HEIGHT = 12;
+const DEFAULT_COMPOSITION_FONT_FAMILY = "JF Flat";
+const DEFAULT_COMPOSITION_FONT_WEIGHT = 800;
+const NORMAL_DIALOGUE_PRESET_ID = "text_preset_global_normal_dialogue";
+const BLACK_BUBBLE_PRESET_ID = "text_preset_global_black_bubble";
 const MIN_BRUSH_SIZE = 1;
 const MAX_BRUSH_SIZE = 96;
 const MIN_BRUSH_POINTS = 2;
@@ -114,6 +118,57 @@ function normalizeOptionalColor(value, fallback = undefined) {
     return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
   }
   return fallback;
+}
+
+function textCompositionIdForTextUnit(textUnitId) {
+  return `text_composition_${textUnitId}`;
+}
+
+function presetIdForTypesetting(typesetting, compositionInput = {}) {
+  if (compositionInput.presetId !== undefined) return compositionInput.presetId;
+  return String(typesetting.color ?? "").toUpperCase() === "#F7F2E8"
+    ? BLACK_BUBBLE_PRESET_ID
+    : NORMAL_DIALOGUE_PRESET_ID;
+}
+
+function styleFromTypesetting(typesetting) {
+  return {
+    color: normalizeOptionalColor(typesetting.color, "#17110B"),
+    fontFamily: DEFAULT_COMPOSITION_FONT_FAMILY,
+    fontSize: normalizeFontSize(typesetting.fontSize),
+    fontWeight: DEFAULT_COMPOSITION_FONT_WEIGHT,
+    opacity: 1,
+  };
+}
+
+function defaultCompositionLayout() {
+  return {
+    allowWordBreak: false,
+    align: "center",
+    direction: "auto",
+    fitMode: "shrink_to_fit",
+    lineHeight: 1.28,
+    maxLines: null,
+    paddingX: 5,
+    paddingY: 4,
+    rotation: 0,
+    verticalAlign: "middle",
+    wrapMode: "word",
+  };
+}
+
+function normalizeCompositionSource(value) {
+  const normalized = String(value ?? "auto").trim();
+  if (["auto", "henry", "manual", "legacy", "imported"].includes(normalized)) return normalized;
+  return "auto";
+}
+
+function normalizeCompositionKind(value) {
+  const normalized = String(value ?? "dialogue").trim();
+  if (["dialogue", "thought", "narration", "shout", "whisper", "aside", "sfx", "title", "sign", "unknown"].includes(normalized)) {
+    return normalized;
+  }
+  return "dialogue";
 }
 
 function normalizeEditPoints(points, pageWidth, pageHeight) {
@@ -614,6 +669,8 @@ class TranslationWorkspaceRepository {
       SELECT
         tu.id,
         tu.chapter_id,
+        tu.page_id,
+        tu.unit_order,
         tu.region_json,
         p.width AS page_width,
         p.height AS page_height,
@@ -688,6 +745,34 @@ class TranslationWorkspaceRepository {
     return typesetting;
   }
 
+  upsertTextCompositionForTypesetting(textUnitId, existing, typesetting, input = {}) {
+    const compositionInput = input?.composition;
+    if (!compositionInput?.enabled) return null;
+
+    const plainText = String(compositionInput.plainText ?? "").trim();
+    if (!plainText) return null;
+
+    return this.textCompositionRepository.upsertTextComposition({
+      box: typesetting.box,
+      chapterId: existing.chapter_id,
+      effects: null,
+      id: textCompositionIdForTextUnit(textUnitId),
+      kind: normalizeCompositionKind(compositionInput.kind),
+      layout: defaultCompositionLayout(),
+      manualFields: Array.isArray(compositionInput.manualFields) ? compositionInput.manualFields : [],
+      origin: compositionInput.origin ?? {
+        createdBy: normalizeCompositionSource(compositionInput.source),
+      },
+      pageId: existing.page_id,
+      plainText,
+      presetId: presetIdForTypesetting(typesetting, compositionInput),
+      renderOrder: Number(existing.unit_order ?? 0),
+      source: normalizeCompositionSource(compositionInput.source),
+      style: styleFromTypesetting(typesetting),
+      textUnitId,
+    });
+  }
+
   updateTextUnitTypesetting(textUnitId, input) {
     const existing = this.getTextUnitTypesettingState(textUnitId);
 
@@ -701,6 +786,7 @@ class TranslationWorkspaceRepository {
     this.db.exec("BEGIN");
     try {
       this.upsertTextUnitTypesettingItem(textUnitId, typesetting, timestamp);
+      this.upsertTextCompositionForTypesetting(textUnitId, existing, typesetting, input);
       this.db.prepare("UPDATE text_units SET updated_at = ? WHERE id = ?").run(timestamp, textUnitId);
       this.db.prepare("UPDATE chapters SET updated_at = ? WHERE id = ?").run(timestamp, existing.chapter_id);
       this.db.prepare(`

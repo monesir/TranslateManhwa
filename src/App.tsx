@@ -478,6 +478,14 @@ function boostSingleWordAutoPasteFontSize(text: string, fontSize: number) {
   return clampTextUnitFontSize(Math.min(fontSize + SINGLE_WORD_AUTO_PASTE_MAX_EXTRA, scaled));
 }
 
+function autoPasteCompositionSource(source: TypesetTranslationSource) {
+  return source === "default" ? "auto" : "henry";
+}
+
+function autoPasteTranslationProvider(source: TypesetTranslationSource) {
+  return source === "default" ? null : source;
+}
+
 function expandAutoTypesetRegion(unit: TextUnit, page: Page, source: TypesetTranslationSource = "default"): RegionBox {
   const translatedText = getAutoTypesetText(unit, source);
   const sourceLength = Math.max(1, unit.sourceText.trim().length);
@@ -3700,6 +3708,17 @@ function TranslationPage() {
     return {
       box,
       color: await resolveTypesetTextColor(page, box, marks),
+      composition: {
+        enabled: true,
+        kind: "dialogue",
+        origin: {
+          algorithmVersion: "auto-paste-v1",
+          createdBy: autoPasteCompositionSource(translationSource),
+          translationProvider: autoPasteTranslationProvider(translationSource),
+        },
+        plainText: text,
+        source: autoPasteCompositionSource(translationSource),
+      },
       fontSize: boostSingleWordAutoPasteFontSize(
         text,
         measureAutoTypesetFontSize(autoTypesetMeasureRef.current, text, box),
