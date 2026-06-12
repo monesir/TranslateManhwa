@@ -1,12 +1,14 @@
 const fs = require("node:fs/promises");
 const fsSync = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
+const { getRuntimePaths, pythonRuntimeEnv } = require("../runtime-paths.cjs");
 const { commandExists, runProcess } = require("./process-utils.cjs");
 
+const RUNTIME_PATHS = getRuntimePaths();
 const PYTHON_BRIDGE = path.join(__dirname, "python_ocr_bridge.py");
 const PYTHON_CROP_SCRIPT = path.join(__dirname, "scripts", "crop-image.py");
 const WINDOWS_OCR_SCRIPT = path.join(__dirname, "scripts", "windows-ocr.ps1");
+const DEFAULT_OCR_PYTHON = path.join(RUNTIME_PATHS.repoRoot, ".venv-ocr", "Scripts", "python.exe");
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_TESSDATA_LANGUAGES = ["ara", "chi_sim", "chi_tra", "eng", "jpn", "kor", "osd"];
 const WINDOWS_OCR_FALLBACK_PROVIDERS = ["paddleocr", "doctr", "easyocr", "rapidocr"];
@@ -139,7 +141,7 @@ function candidateTessdataDirectories() {
   return [
     process.env.FLORIS_TESSDATA_DIR,
     process.env.TESSDATA_PREFIX,
-    process.env.APPDATA ? path.join(process.env.APPDATA, "floris-manhwa-translator", "tessdata") : null,
+    RUNTIME_PATHS.tessdataPath,
     process.platform === "win32" ? path.join(process.env.ProgramFiles || "C:\\Program Files", "Tesseract-OCR", "tessdata") : null,
     process.platform === "win32"
       ? path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Tesseract-OCR", "tessdata")
@@ -267,7 +269,7 @@ async function cropWithPython(pythonCommand, sourcePath, outputPath, cropRect, s
       "--autocontrast",
       "--white-background",
     ],
-    { timeoutMs: 30_000 },
+    { env: pythonRuntimeEnv(process.env, RUNTIME_PATHS), timeoutMs: 30_000 },
   );
 
   return {
@@ -276,10 +278,11 @@ async function cropWithPython(pythonCommand, sourcePath, outputPath, cropRect, s
   };
 }
 
-async function cropPageForRegion(page, region, pythonCommand = process.env.FLORIS_PYTHON || "python") {
+async function cropPageForRegion(page, region, pythonCommand = resolvePythonCommand()) {
   const cropRect = normalizeCropRect(region, page);
   const scale = regionCropScale(cropRect);
-  const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "floris-ocr-region-"));
+  await fs.mkdir(RUNTIME_PATHS.tempRoot, { recursive: true });
+  const tempDirectory = await fs.mkdtemp(path.join(RUNTIME_PATHS.tempRoot, "floris-ocr-region-"));
   const outputPath = path.join(tempDirectory, "region.png");
 
   try {
@@ -601,14 +604,14 @@ function parseTesseractTsv(tsv, page) {
 }
 
 async function checkPythonImport(moduleName) {
-  const python = process.env.FLORIS_PYTHON || "python";
+  const python = resolvePythonCommand();
   const result = await runProcess(
     python,
     [
       "-c",
       `import importlib.util, sys; sys.exit(0 if importlib.util.find_spec(${JSON.stringify(moduleName)}) else 1)`,
     ],
-    { timeoutMs: 8_000 },
+    { env: pythonRuntimeEnv(process.env, RUNTIME_PATHS), timeoutMs: 8_000 },
   );
   return result.ok;
 }
@@ -622,7 +625,7 @@ async function checkPythonImportAny(moduleNames) {
 
 class OcrProviderRegistry {
   constructor(options = {}) {
-    this.pythonCommand = options.pythonCommand || process.env.FLORIS_PYTHON || "python";
+    this.pythonCommand = options.pythonCommand || resolvePythonCommand();
   }
 
   providerMetadata() {
@@ -660,7 +663,10 @@ class OcrProviderRegistry {
         ];
         const tag = languageHintToWindowsTag(languageHint);
         if (tag) args.push("-LanguageTag", tag);
-        const result = await runProcess("powershell.exe", args, { timeoutMs: 8_000 });
+        const result = await runProcess("powershell.exe", args, {
+          env: pythonRuntimeEnv(process.env, RUNTIME_PATHS),
+          timeoutMs: 8_000,
+        });
         return {
           ...provider,
           available: result.ok,
@@ -795,7 +801,10 @@ class OcrProviderRegistry {
     ];
     const tag = languageHintToWindowsTag(options.languageHint);
     if (tag) args.push("-LanguageTag", tag);
-    const result = await runProcess("powershell.exe", args, { timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+    const result = await runProcess("powershell.exe", args, {
+      env: pythonRuntimeEnv(process.env, RUNTIME_PATHS),
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    });
     const payload = parseJsonOutput(result, "windows");
     const primaryResult = {
       languageDetected: payload.languageDetected ?? tag ?? null,
@@ -827,7 +836,7 @@ class OcrProviderRegistry {
         "--page-height",
         String(page.height),
       ],
-      { timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS },
+      { env: pythonRuntimeEnv(process.env, RUNTIME_PATHS), timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS },
     );
     const payload = parseJsonOutput(result, providerId);
     return {
@@ -856,7 +865,7 @@ class OcrProviderRegistry {
     const result = await runProcess(
       command,
       args,
-      { timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS },
+      { env: pythonRuntimeEnv(process.env, RUNTIME_PATHS), timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS },
     );
     if (!result.ok) {
       throw new Error(result.stderr.trim() || result.stdout.trim() || "Tesseract failed.");
@@ -867,6 +876,12 @@ class OcrProviderRegistry {
       providerId: "tesseract",
     };
   }
+}
+
+function resolvePythonCommand() {
+  if (process.env.FLORIS_PYTHON) return process.env.FLORIS_PYTHON;
+  if (fsSync.existsSync(DEFAULT_OCR_PYTHON)) return DEFAULT_OCR_PYTHON;
+  return "python";
 }
 
 module.exports = {

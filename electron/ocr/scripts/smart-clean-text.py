@@ -1,6 +1,42 @@
 import json
 import os
 import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+CACHE_ROOT = Path(os.environ.get("FLORIS_CACHE_ROOT") or REPO_ROOT / ".cache")
+MODELS_ROOT = Path(os.environ.get("FLORIS_MODELS_ROOT") or REPO_ROOT / ".models")
+PYTHON_CACHE_ROOT = CACHE_ROOT / "python"
+HUGGINGFACE_HOME = MODELS_ROOT / "huggingface"
+HUGGINGFACE_HUB = HUGGINGFACE_HOME / "hub"
+LOCAL_ENV_DEFAULTS = {
+    "DOCTR_CACHE_DIR": MODELS_ROOT / "doctr",
+    "EASYOCR_MODULE_PATH": MODELS_ROOT / "easyocr",
+    "FLORIS_CACHE_ROOT": CACHE_ROOT,
+    "FLORIS_MODELS_ROOT": MODELS_ROOT,
+    "FLORIS_TESSDATA_DIR": MODELS_ROOT / "tessdata",
+    "HF_HOME": HUGGINGFACE_HOME,
+    "HF_HUB_CACHE": HUGGINGFACE_HUB,
+    "HF_DATASETS_CACHE": HUGGINGFACE_HOME / "datasets",
+    "HUGGINGFACE_HUB_CACHE": HUGGINGFACE_HUB,
+    "MANGA_OCR_HOME": MODELS_ROOT / "manga-ocr",
+    "MPLCONFIGDIR": PYTHON_CACHE_ROOT / "matplotlib",
+    "NUMBA_CACHE_DIR": PYTHON_CACHE_ROOT / "numba",
+    "PADDLE_HOME": MODELS_ROOT / "paddle",
+    "PADDLEOCR_HOME": MODELS_ROOT / "paddleocr",
+    "PIP_CACHE_DIR": PYTHON_CACHE_ROOT / "pip",
+    "TESSDATA_PREFIX": MODELS_ROOT / "tessdata",
+    "TORCH_HOME": MODELS_ROOT / "torch",
+    "TRANSFORMERS_CACHE": HUGGINGFACE_HUB,
+    "XDG_CACHE_HOME": PYTHON_CACHE_ROOT,
+}
+for key, value in LOCAL_ENV_DEFAULTS.items():
+    os.environ.setdefault(key, str(value))
+for directory in set(LOCAL_ENV_DEFAULTS.values()):
+    try:
+        Path(directory).mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
 
 import cv2
 import numpy as np

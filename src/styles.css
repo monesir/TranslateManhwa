@@ -1,7 +1,16 @@
+@font-face {
+  font-family: "JF Flat";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/JF-Flat-Regular.ttf") format("truetype");
+}
+
 :root {
   color-scheme: dark;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --typeset-font: "JF Flat", "Segoe UI", Tahoma, Arial, sans-serif;
   background: #000000;
   color: #e6e1d8;
   --bg: #000000;
@@ -1523,6 +1532,30 @@ h3 {
   max-width: 156px;
 }
 
+.compact-number-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.compact-number-input {
+  width: 50px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #0d1417;
+  color: var(--text);
+  text-align: center;
+}
+
 .compact-check {
   display: inline-flex;
   align-items: center;
@@ -1610,8 +1643,29 @@ h3 {
   display: grid;
   grid-template-rows: 58px minmax(0, 1fr);
   height: 100vh;
-  overflow: hidden;
+  overflow: visible;
   background: var(--bg);
+}
+
+.auto-typeset-measure {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  z-index: -1;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 3px 5px;
+  border: 0;
+  font-family: var(--typeset-font);
+  font-weight: 800;
+  line-height: 1.28;
+  overflow-wrap: normal;
+  pointer-events: none;
+  text-align: center;
+  visibility: hidden;
+  white-space: pre-wrap;
+  word-break: normal;
+  hyphens: none;
 }
 
 .translation-topbar {
@@ -2044,24 +2098,31 @@ h3 {
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  overflow: visible;
   padding: 3px 5px;
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
   color: #17110b;
   cursor: move;
-  line-height: 1.25;
+  font-family: var(--typeset-font);
+  font-weight: 800;
+  line-height: 1.28;
   pointer-events: auto;
   text-align: center;
   user-select: none;
 }
 
 .edit-text-content {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  display: block;
+  overflow: visible;
+  max-width: 100%;
+  width: 100%;
+  overflow-wrap: normal;
+  padding-bottom: 0.16em;
+  white-space: pre-wrap;
+  word-break: normal;
+  hyphens: none;
 }
 
 .edit-text-region:hover,
@@ -2454,6 +2515,15 @@ h3 {
 .text-size-panel {
   display: grid;
   gap: 12px;
+}
+
+.auto-typeset-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.auto-typeset-hint {
+  color: var(--muted) !important;
 }
 
 .text-size-control {
@@ -3237,6 +3307,57 @@ h3 {
   font-size: 0.8rem;
   color: var(--color-text-secondary, #a0a0a0);
   font-weight: 500;
+}
+
+.henry-provider-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.henry-provider-picker > .floirs-button {
+  white-space: nowrap;
+}
+
+.floirs-button.active-command {
+  border-color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.henry-provider-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  min-width: 210px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: #080808;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.45);
+}
+
+.henry-provider-menu button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #efefef;
+  font: inherit;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.henry-provider-menu button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
 }
 
 .edit-context-btn {

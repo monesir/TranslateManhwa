@@ -1,0 +1,74 @@
+{
+  "version": "1.0",
+  "job": {
+    "scope": "text_unit",
+    "mode": "draft",
+    "sourceLanguage": "en",
+    "targetLanguage": "ar",
+    "translationLevel": 3,
+    "applyGlossaryStrictly": true,
+    "preferConciseBubbleText": true
+  },
+  "project": {
+    "projectId": "project_demo",
+    "title": "Demo Manhwa",
+    "arabicTitle": "مانهوا تجريبية",
+    "synopsis": "A revenge fantasy story.",
+    "genre": "fantasy action",
+    "toneNotes": "Serious with direct dialogue.",
+    "translationNotes": null
+  },
+  "chapter": {
+    "chapterId": "chapter_001",
+    "title": "The Duel",
+    "chapterNumber": 1,
+    "summary": "The protagonist confronts an enemy commander.",
+    "previousSummary": null,
+    "sceneNotes": "The speaker is calm and threatening."
+  },
+  "glossary": {
+    "characters": [
+      {
+        "id": "char_arin",
+        "englishName": "Arin",
+        "arabicName": "آرين",
+        "gender": "Male",
+        "aliases": [
+          {
+            "english": "The Black Sword",
+            "arabic": "السيف الأسود"
+          }
+        ],
+        "description": "Main character. Calm, concise, and intimidating."
+      }
+    ],
+    "terms": []
+  },
+  "units": [
+    {
+      "textUnitId": "unit_001",
+      "pageId": "page_001",
+      "pageIndex": 0,
+      "sequenceIndex": 0,
+      "sourceText": "I AM NOT THE\nONE WHO WILL BE\nKILLING YOU.",
+      "normalizedSourceText": "I AM NOT THE ONE WHO WILL BE KILLING YOU.",
+      "ocrConfidence": 0.96,
+      "speakerCharacterId": "char_arin",
+      "microsoftTranslation": "أنا لست من شخص سيكون يقتلك.",
+      "currentArabicText": null,
+      "boundingBox": {
+        "x": 340,
+        "y": 180,
+        "width": 220,
+        "height": 130,
+        "pageWidth": 800,
+        "pageHeight": 1200
+      },
+      "neighboringText": {
+        "previous": [],
+        "next": []
+      }
+    }
+  ],
+  "previousTranslations": []
+}

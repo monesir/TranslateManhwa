@@ -5,9 +5,18 @@ const { promisify } = require("node:util");
 const { nativeImage } = require("electron");
 const { PAGE_CACHE_HOST } = require("../data/chapter-page-store.cjs");
 const { COVER_CACHE_SCHEME } = require("../data/cover-cache.cjs");
+const { getRuntimePaths, pythonRuntimeEnv } = require("../runtime-paths.cjs");
 
 const execFileAsync = promisify(execFile);
+const RUNTIME_PATHS = getRuntimePaths();
 const SAMPLE_COLOR_SCRIPT = path.join(__dirname, "..", "ocr", "scripts", "sample-color.py");
+const DEFAULT_OCR_PYTHON = path.join(RUNTIME_PATHS.repoRoot, ".venv-ocr", "Scripts", "python.exe");
+
+function resolvePythonCommand() {
+  if (process.env.FLORIS_PYTHON) return process.env.FLORIS_PYTHON;
+  if (fs.existsSync(DEFAULT_OCR_PYTHON)) return DEFAULT_OCR_PYTHON;
+  return "python";
+}
 
 function assertInsideWorkspace(workspacePath, candidatePath) {
   const workspaceRoot = path.resolve(workspacePath);
@@ -59,6 +68,7 @@ async function sampleWithPython({ imagePath, page, point, pythonCommand }) {
       String(page.height),
     ],
     {
+      env: pythonRuntimeEnv(process.env, RUNTIME_PATHS),
       maxBuffer: 1024 * 1024,
       windowsHide: true,
     },
@@ -107,7 +117,7 @@ class PageColorService {
   constructor(db, options = {}) {
     this.db = db;
     this.workspacePath = options.workspacePath;
-    this.pythonCommand = options.pythonCommand || process.env.FLORIS_PYTHON || "python";
+    this.pythonCommand = options.pythonCommand || resolvePythonCommand();
   }
 
   getPage(pageId) {

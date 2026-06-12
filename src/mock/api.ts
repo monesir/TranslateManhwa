@@ -1,5 +1,6 @@
 import type {
   Chapter,
+  ChapterExportResult,
   ChapterTranslationWorkspace,
   Character,
   CharacterAlias,
@@ -39,6 +40,8 @@ import type {
   TextUnitTypesettingInput,
   TranslateTextUnitsInput,
   TranslateTextUnitsResult,
+  AiTranslationProviderStatus,
+  TranslateWithAiInput,
   DeleteOcrResultsInput,
   DeleteOcrResultsResult,
   UpdateTextUnitSourceInput,
@@ -90,7 +93,7 @@ const delay = <T>(value: T, ms = 120): Promise<T> =>
   });
 
 function clampFontSize(value: number) {
-  return Math.max(8, Math.min(72, Math.round(value)));
+  return Math.max(8, Math.min(360, Math.round(value)));
 }
 
 function clampTextBox(box: RegionBox | undefined, fallback: RegionBox, page?: Page): RegionBox {
@@ -710,6 +713,65 @@ export async function translateWithMicrosoft(input: TranslateTextUnitsInput): Pr
   }, 180);
 }
 
+export async function listAiTranslationProviders(
+  input: Partial<TranslateWithAiInput> = {},
+): Promise<AiTranslationProviderStatus[]> {
+  if (window.florisApi) return window.florisApi.listAiTranslationProviders(input);
+  return delay([
+    {
+      available: false,
+      id: "openai_compatible",
+      label: "OpenAI-compatible chat completions",
+      model: input.model ?? "mock-model",
+      reason: "Electron runtime is required for real AI translation.",
+      requires: "Configure FLORIS_AI_TRANSLATION_API_KEY in Electron.",
+    },
+  ], 80);
+}
+
+export async function translateWithAi(input: TranslateWithAiInput): Promise<TranslateTextUnitsResult> {
+  if (window.florisApi) return window.florisApi.translateWithAi(input);
+
+  const chapterId = input.chapterId;
+  const runId = `translation_run_ai_mock_${Date.now()}`;
+  const level = input.translationLevel ?? 3;
+  const scopedUnits = mutableTextUnits.filter((unit) => {
+    if (unit.chapterId !== chapterId) return false;
+    if (input.scope === "text_unit") return unit.id === input.textUnitId;
+    if (input.scope === "page") return unit.pageId === input.pageId;
+    return true;
+  });
+  let translatedCount = 0;
+  mutableTextUnits = mutableTextUnits.map((unit) => {
+    if (!scopedUnits.some((item) => item.id === unit.id)) return unit;
+    translatedCount += 1;
+    return {
+      ...unit,
+      aiTranslation: `[AI L${level}] ${unit.sourceText}`,
+    };
+  });
+  return delay({
+    chapterId,
+    failedCount: 0,
+    provider: "ai",
+    runId,
+    status: "completed",
+    translatedCount,
+  }, 180);
+}
+
+export async function exportChapter(chapterId: string): Promise<ChapterExportResult> {
+  if (window.florisApi) return window.florisApi.exportChapter(chapterId);
+  return delay({
+    chapterId,
+    files: [],
+    kind: "chapter_pages_png",
+    outputPath: "",
+    pagesExported: 0,
+    status: "cancelled",
+  }, 120);
+}
+
 export async function deleteOcrResults(input: DeleteOcrResultsInput): Promise<DeleteOcrResultsResult> {
   if (window.florisApi) return window.florisApi.deleteOcrResults(input);
 
@@ -822,7 +884,7 @@ export async function deleteTextUnit(textUnitId: string): Promise<{ chapterId: s
 export async function updateTextUnitTypesetting(
   textUnitId: string,
   input: TextUnitTypesettingInput,
-): Promise<{ box: RegionBox; chapterId: string; fontSize: number; id: string }> {
+): Promise<{ box: RegionBox; chapterId: string; color?: string; fontSize: number; id: string }> {
   if (window.florisApi) return window.florisApi.updateTextUnitTypesetting(textUnitId, input);
 
   const existing = mutableTextUnits.find((unit) => unit.id === textUnitId);
@@ -834,10 +896,12 @@ export async function updateTextUnitTypesetting(
     : clampFontSize(input.fontSize);
   const box = clampTextBox(input.box, existing.typesetting?.box ?? existing.region, page);
   mutableTextUnits = mutableTextUnits.map((unit) =>
-    unit.id === textUnitId ? { ...unit, typesetting: { ...unit.typesetting, box, fontSize } } : unit,
+    unit.id === textUnitId
+      ? { ...unit, typesetting: { ...unit.typesetting, box, color: input.color ?? unit.typesetting?.color ?? "#17110B", fontSize } }
+      : unit,
   );
 
-  return delay({ box, chapterId: existing.chapterId, fontSize, id: textUnitId }, 80);
+  return delay({ box, chapterId: existing.chapterId, color: input.color ?? existing.typesetting?.color ?? "#17110B", fontSize, id: textUnitId }, 80);
 }
 
 export async function updateChapterTextSize(

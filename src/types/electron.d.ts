@@ -1,5 +1,6 @@
 import type {
   ChapterTranslationWorkspace,
+  ChapterExportResult,
   Character,
   CharacterAlias,
   CharacterInput,
@@ -27,6 +28,7 @@ import type {
   ChapterTextSizeInput,
   DeleteOcrResultsInput,
   DeleteOcrResultsResult,
+  AiTranslationProviderStatus,
   RegionBox,
   SourceCatalogItem,
   SourceChapterPreparationResult,
@@ -39,6 +41,7 @@ import type {
   TextUnitTypesettingInput,
   TranslateTextUnitsInput,
   TranslateTextUnitsResult,
+  TranslateWithAiInput,
   UpdateTextUnitSourceInput,
 } from "./domain";
 
@@ -71,7 +74,7 @@ interface FlorisApi {
   updateTextUnitTypesetting(
     textUnitId: string,
     input: TextUnitTypesettingInput,
-  ): Promise<{ box: RegionBox; chapterId: string; fontSize: number; id: string }>;
+  ): Promise<{ box: RegionBox; chapterId: string; color?: string; fontSize: number; id: string }>;
   updateChapterTextSize(
     chapterId: string,
     input: ChapterTextSizeInput,
@@ -85,6 +88,9 @@ interface FlorisApi {
     input: RestoreCleanPatchAreaInput,
   ): Promise<RestoreCleanPatchAreaResult>;
   translateWithMicrosoft(input: TranslateTextUnitsInput): Promise<TranslateTextUnitsResult>;
+  listAiTranslationProviders(input?: Partial<TranslateWithAiInput>): Promise<AiTranslationProviderStatus[]>;
+  translateWithAi(input: TranslateWithAiInput): Promise<TranslateTextUnitsResult>;
+  exportChapter(chapterId: string): Promise<ChapterExportResult>;
   mergeChapterPages(chapterId: string, input: MergeChapterPagesInput): Promise<MergeChapterPagesResult>;
   removeMergedPages(chapterId: string): Promise<RemoveMergedPagesResult>;
   addCharacter(projectId: string, input: CharacterInput): Promise<Character>;

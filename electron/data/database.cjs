@@ -3,9 +3,12 @@ const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 const { runMigrations } = require("./migrations.cjs");
 const { seedDatabase } = require("./seed.cjs");
+const { ensureWorkspaceAtLocalPath, getRuntimePaths } = require("../runtime-paths.cjs");
 
 function createDatabase(app) {
-  const workspacePath = path.join(app.getPath("userData"), "workspace");
+  const runtimePaths = getRuntimePaths();
+  const workspaceResult = ensureWorkspaceAtLocalPath(app, runtimePaths);
+  const workspacePath = workspaceResult.workspacePath;
   fs.mkdirSync(workspacePath, { recursive: true });
 
   const dbPath = path.join(workspacePath, "floris.db");
@@ -23,6 +26,8 @@ function createDatabase(app) {
   return {
     db,
     dbPath,
+    migratedFrom: workspaceResult.migratedFrom,
+    runtimePaths,
     workspacePath,
   };
 }

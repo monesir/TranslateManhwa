@@ -2,12 +2,14 @@ const { ProjectRepository } = require("../data/repositories/project-repository.c
 const { ChapterRepository } = require("../data/repositories/chapter-repository.cjs");
 const { ChapterPageStore } = require("../data/chapter-page-store.cjs");
 const { CoverCache } = require("../data/cover-cache.cjs");
+const { ChapterExportService } = require("./chapter-export-service.cjs");
 const { DictionaryRepository } = require("../data/repositories/dictionary-repository.cjs");
 const { OcrService } = require("./ocr-service.cjs");
 const { PageColorService } = require("./page-color-service.cjs");
 const { PageCleanService } = require("./page-clean-service.cjs");
 const { PageMergeService } = require("./page-merge-service.cjs");
 const { TranslationService } = require("./translation-service.cjs");
+const { AiTranslationService } = require("./ai-translation-service.cjs");
 const {
   SourceImportRepository,
   sourceChapterId,
@@ -36,6 +38,8 @@ function createAppApi(db, options = {}) {
   const pageCleanService = new PageCleanService(db, { workspacePath: options.workspacePath });
   const pageMergeService = new PageMergeService(db, { workspacePath: options.workspacePath });
   const translationService = new TranslationService(db);
+  const aiTranslationService = new AiTranslationService(db, { workspacePath: options.workspacePath });
+  const chapterExportService = new ChapterExportService(db, { workspacePath: options.workspacePath });
 
   return {
     listProjects() {
@@ -110,12 +114,24 @@ function createAppApi(db, options = {}) {
       return translationService.translateMicrosoft(input);
     },
 
+    listAiTranslationProviders(input) {
+      return aiTranslationService.listProviders(input);
+    },
+
+    translateWithAi(input) {
+      return aiTranslationService.translate(input);
+    },
+
     mergeChapterPages(chapterId, input) {
       return pageMergeService.mergeEveryTwoPages(chapterId, input);
     },
 
     removeMergedPages(chapterId) {
       return pageMergeService.removeMergedPages(chapterId);
+    },
+
+    exportChapter(chapterId, input) {
+      return chapterExportService.exportChapter(chapterId, input);
     },
 
     listOcrProviders(languageHint) {

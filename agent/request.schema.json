@@ -1,0 +1,328 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://florismnhar.local/agent/request.schema.json",
+  "title": "FlorisMNHar AI Translation Request",
+  "type": "object",
+  "required": ["version", "job", "project", "units"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "job": {
+      "type": "object",
+      "required": ["scope", "mode", "sourceLanguage", "targetLanguage", "translationLevel"],
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": ["text_unit", "page", "chapter"]
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["draft", "revise", "final"]
+        },
+        "sourceLanguage": {
+          "type": "string",
+          "default": "en"
+        },
+        "targetLanguage": {
+          "type": "string",
+          "default": "ar"
+        },
+        "translationLevel": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "applyGlossaryStrictly": {
+          "type": "boolean",
+          "default": true
+        },
+        "preferConciseBubbleText": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "required": ["projectId", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "arabicTitle": {
+          "type": ["string", "null"]
+        },
+        "synopsis": {
+          "type": ["string", "null"]
+        },
+        "genre": {
+          "type": ["string", "null"]
+        },
+        "toneNotes": {
+          "type": ["string", "null"]
+        },
+        "translationNotes": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "chapter": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "chapterId": {
+          "type": "string"
+        },
+        "title": {
+          "type": ["string", "null"]
+        },
+        "chapterNumber": {
+          "type": ["number", "string", "null"]
+        },
+        "summary": {
+          "type": ["string", "null"]
+        },
+        "previousSummary": {
+          "type": ["string", "null"]
+        },
+        "sceneNotes": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "glossary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "characters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/character"
+          },
+          "default": []
+        },
+        "terms": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/term"
+          },
+          "default": []
+        }
+      },
+      "default": {
+        "characters": [],
+        "terms": []
+      }
+    },
+    "units": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/textUnit"
+      }
+    },
+    "previousTranslations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/previousTranslation"
+      },
+      "default": []
+    }
+  },
+  "$defs": {
+    "character": {
+      "type": "object",
+      "required": ["id", "englishName", "arabicName", "gender"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "englishName": {
+          "type": "string"
+        },
+        "arabicName": {
+          "type": "string"
+        },
+        "gender": {
+          "type": "string",
+          "enum": ["Male", "Female", "Unknown"]
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["english", "arabic"],
+            "additionalProperties": false,
+            "properties": {
+              "english": {
+                "type": "string"
+              },
+              "arabic": {
+                "type": "string"
+              }
+            }
+          },
+          "default": []
+        },
+        "description": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "term": {
+      "type": "object",
+      "required": ["id", "englishTerm", "arabicTerm", "category"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "englishTerm": {
+          "type": "string"
+        },
+        "arabicTerm": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "description": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "textUnit": {
+      "type": "object",
+      "required": ["textUnitId", "pageId", "pageIndex", "sequenceIndex", "sourceText"],
+      "additionalProperties": false,
+      "properties": {
+        "textUnitId": {
+          "type": "string"
+        },
+        "pageId": {
+          "type": "string"
+        },
+        "pageIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sequenceIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sourceText": {
+          "type": "string"
+        },
+        "normalizedSourceText": {
+          "type": ["string", "null"]
+        },
+        "ocrConfidence": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "speakerCharacterId": {
+          "type": ["string", "null"]
+        },
+        "microsoftTranslation": {
+          "type": ["string", "null"]
+        },
+        "currentArabicText": {
+          "type": ["string", "null"]
+        },
+        "boundingBox": {
+          "$ref": "#/$defs/boundingBox"
+        },
+        "neighboringText": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "previous": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/neighborText"
+              },
+              "default": []
+            },
+            "next": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/neighborText"
+              },
+              "default": []
+            }
+          },
+          "default": {
+            "previous": [],
+            "next": []
+          }
+        }
+      }
+    },
+    "boundingBox": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
+        },
+        "pageWidth": {
+          "type": ["number", "null"]
+        },
+        "pageHeight": {
+          "type": ["number", "null"]
+        }
+      }
+    },
+    "neighborText": {
+      "type": "object",
+      "required": ["textUnitId", "sourceText"],
+      "additionalProperties": false,
+      "properties": {
+        "textUnitId": {
+          "type": "string"
+        },
+        "sourceText": {
+          "type": "string"
+        },
+        "arabicText": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "previousTranslation": {
+      "type": "object",
+      "required": ["textUnitId", "sourceText", "arabicText"],
+      "additionalProperties": false,
+      "properties": {
+        "textUnitId": {
+          "type": "string"
+        },
+        "sourceText": {
+          "type": "string"
+        },
+        "arabicText": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

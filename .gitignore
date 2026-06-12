@@ -3,5 +3,9 @@ dist/
 dev-server.log
 electron-run.log
 .run/
+.cache/
+.models/
+.workspace/
 .venv-lama/
+.venv-ocr/
 *.local

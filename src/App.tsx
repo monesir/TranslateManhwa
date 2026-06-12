@@ -77,6 +77,7 @@ import {
   deletePageEditMark,
   deleteTextUnit,
   ensureSourceProject,
+  exportChapter,
   getChapterForTranslation,
   getExplorerSeriesDetails,
   getLibraryStats,
@@ -105,6 +106,7 @@ import {
   updateGlossaryTerm,
   updateTextUnitSource,
   updateTextUnitTypesetting,
+  translateWithAi,
   translateWithMicrosoft,
 } from "./mock/api";
 import type {
@@ -141,6 +143,7 @@ import type {
   SourceTitleSummary,
   TextUnit,
   TextUnitTypesettingInput,
+  TranslationLevel,
 } from "./types/domain";
 import { useTranslationWorkspaceStore } from "./stores/translation-workspace-store";
 
@@ -239,9 +242,12 @@ interface OcrSelectionState {
 }
 
 type TextBoxDragMode = "move" | "resize-nw" | "resize-ne" | "resize-sw" | "resize-se";
+type HenryTranslationProvider = "microsoft" | "ai";
+type TypesetTranslationSource = "default" | HenryTranslationProvider;
 
 interface TextBoxDragState {
   currentBox: RegionBox;
+  didMove: boolean;
   mode: TextBoxDragMode;
   page: Page;
   startBox: RegionBox;
@@ -337,10 +343,27 @@ const DEFAULT_OCR_REGION_EXPANSION: OcrRegionExpansion = {
   top: 30,
 };
 const MIN_TEXT_UNIT_FONT_SIZE = 8;
-const MAX_TEXT_UNIT_FONT_SIZE = 72;
+const MAX_TEXT_UNIT_FONT_SIZE = 360;
 const TEXT_UNIT_FONT_STEP = 2;
 const MIN_TEXT_BOX_WIDTH = 16;
 const MIN_TEXT_BOX_HEIGHT = 12;
+const AUTO_TYPESET_MIN_PADDING_X = 10;
+const AUTO_TYPESET_MAX_PADDING_X = 72;
+const AUTO_TYPESET_MIN_PADDING_Y = 6;
+const AUTO_TYPESET_MAX_PADDING_Y = 48;
+const TYPESET_DARK_TEXT_COLOR = "#17110B";
+const TYPESET_LIGHT_TEXT_COLOR = "#F7F2E8";
+const TYPESET_BACKGROUND_DARK_LUMINANCE = 112;
+const TYPESET_FIT_GUARD_PX = 2;
+const TYPESET_CANVAS_FONT_FAMILY = '"JF Flat", "Segoe UI", Tahoma, Arial, sans-serif';
+const TYPESET_MEASURE_LINE_HEIGHT = 1.28;
+const TYPESET_MEASURE_PADDING_X = 5;
+const TYPESET_MEASURE_PADDING_Y = 4;
+const AUTO_PASTE_BOX_COMFORT_SCALE_X = 1.08;
+const AUTO_PASTE_BOX_COMFORT_SCALE_Y = 1.08;
+const TYPESET_VISUAL_SIZE_FACTOR = 1.72;
+const TYPESET_FORCE_SCALE = 1.85;
+const TYPESET_RENDER_SCALE = 2.35;
 const MIN_BRUSH_SIZE = 2;
 const MAX_BRUSH_SIZE = 96;
 const DEFAULT_BRUSH_SIZE = 34;
@@ -350,10 +373,18 @@ const MAX_CLEAN_STRENGTH = 12;
 const DEFAULT_CLEAN_STRENGTH = 4;
 const MAX_CLEAN_MASK_EXPANSION = 18;
 const MAX_CLEAN_FEATHER = 16;
+const MIN_PAGE_WORKERS = 1;
+const MAX_PAGE_WORKERS = 12;
+const TEXT_BOX_DRAG_THRESHOLD_PX = 3;
 
 function clampTextUnitFontSize(value: number) {
   if (!Number.isFinite(value)) return 18;
   return Math.max(MIN_TEXT_UNIT_FONT_SIZE, Math.min(MAX_TEXT_UNIT_FONT_SIZE, Math.round(value)));
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
 }
 
 function clampTextBoxToPage(box: RegionBox, page: Page): RegionBox {
@@ -416,6 +447,167 @@ function transformTextBox(
   }, page);
 }
 
+function getAutoTypesetText(unit: TextUnit, source: TypesetTranslationSource = "default") {
+  const candidateOrder = source === "ai"
+    ? [unit.finalTranslation, unit.aiTranslation, unit.microsoftTranslation]
+    : [unit.finalTranslation, unit.microsoftTranslation, unit.aiTranslation];
+  return candidateOrder
+    .map((text) => text.trim())
+    .find((text) => text.length > 0) ?? "";
+}
+
+function getOverlayText(unit: TextUnit) {
+  return getAutoTypesetText(unit) || unit.sourceText;
+}
+
+function expandAutoTypesetRegion(unit: TextUnit, page: Page, source: TypesetTranslationSource = "default"): RegionBox {
+  const translatedText = getAutoTypesetText(unit, source);
+  const sourceLength = Math.max(1, unit.sourceText.trim().length);
+  const targetLength = Math.max(1, translatedText.length);
+  const compactTargetLength = Math.max(1, translatedText.replace(/\s+/g, "").length);
+  const sourceLineCount = Math.max(1, unit.sourceText.trim().split(/\r?\n/).filter(Boolean).length);
+  const targetLineCount = Math.max(1, translatedText.trim().split(/\r?\n/).filter(Boolean).length);
+  const lengthRatio = clampNumber(targetLength / sourceLength, 1, 2.4);
+  const shortTextPadBoost = compactTargetLength <= 4 ? 20 : compactTargetLength <= 8 ? 14 : 0;
+  const multilinePadBoost = Math.max(0, targetLineCount - sourceLineCount) * 8;
+  const padX = clampNumber(
+    unit.region.width * 0.16 + (lengthRatio - 1) * 14 + shortTextPadBoost,
+    AUTO_TYPESET_MIN_PADDING_X,
+    AUTO_TYPESET_MAX_PADDING_X,
+  );
+  const padY = clampNumber(
+    unit.region.height * 0.18 + (lengthRatio - 1) * 10 + multilinePadBoost,
+    AUTO_TYPESET_MIN_PADDING_Y,
+    AUTO_TYPESET_MAX_PADDING_Y,
+  );
+
+  return clampTextBoxToPage({
+    type: "box",
+    x: unit.region.x - padX,
+    y: unit.region.y - padY,
+    width: unit.region.width + padX * 2,
+    height: unit.region.height + padY * 2,
+  }, page);
+}
+
+function wrapMeasuredText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+) {
+  const lines: string[] = [];
+  const paragraphs = text
+    .split(/\r?\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+
+  for (const paragraph of paragraphs) {
+    let current = "";
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (context.measureText(candidate).width <= maxWidth || !current) {
+        current = candidate;
+      } else {
+        lines.push(current);
+        current = word;
+      }
+    }
+    if (current) lines.push(current);
+  }
+
+  return lines;
+}
+
+function measureAutoTypesetFontSizeWithCanvas(text: string, box: RegionBox) {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+
+  const maxWidth = Math.max(1, box.width - TYPESET_MEASURE_PADDING_X * 2);
+  const maxHeight = Math.max(1, box.height - TYPESET_MEASURE_PADDING_Y * 2);
+  let low = MIN_TEXT_UNIT_FONT_SIZE;
+  let high = MAX_TEXT_UNIT_FONT_SIZE;
+  let best = MIN_TEXT_UNIT_FONT_SIZE;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const renderedFontSize = mid * TYPESET_RENDER_SCALE;
+    context.font = `800 ${renderedFontSize}px ${TYPESET_CANVAS_FONT_FAMILY}`;
+    const lines = wrapMeasuredText(context, text, maxWidth);
+    const widest = Math.max(...lines.map((line) => context.measureText(line).width), 0);
+    const totalHeight = lines.length * renderedFontSize * TYPESET_MEASURE_LINE_HEIGHT;
+    if (lines.length > 0 && widest <= maxWidth + 1 && totalHeight <= maxHeight + 1) {
+      best = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return clampTextUnitFontSize(best);
+}
+
+function expandRegionAroundCenter(box: RegionBox, page: Page, width: number, height: number): RegionBox {
+  const nextWidth = Math.min(page.width, Math.max(MIN_TEXT_BOX_WIDTH, width));
+  const nextHeight = Math.min(page.height, Math.max(MIN_TEXT_BOX_HEIGHT, height));
+  const centerX = box.x + box.width / 2;
+  const centerY = box.y + box.height / 2;
+  return {
+    type: "box",
+    x: Math.max(0, Math.min(page.width - nextWidth, centerX - nextWidth / 2)),
+    y: Math.max(0, Math.min(page.height - nextHeight, centerY - nextHeight / 2)),
+    width: nextWidth,
+    height: nextHeight,
+  };
+}
+
+function addAutoPasteComfortToBox(box: RegionBox, page: Page) {
+  return expandRegionAroundCenter(
+    box,
+    page,
+    box.width * AUTO_PASTE_BOX_COMFORT_SCALE_X,
+    box.height * AUTO_PASTE_BOX_COMFORT_SCALE_Y,
+  );
+}
+
+function estimateVisualAutoTypesetFontSize(text: string, box: RegionBox) {
+  const compactText = text.replace(/\s+/g, "");
+  const visualLength = Math.max(1, compactText.length + (text.length - compactText.length) * 0.35);
+  const areaFont = Math.sqrt(Math.max(1, box.width * box.height) / visualLength) * TYPESET_VISUAL_SIZE_FACTOR;
+  const heightFloor = box.height * (visualLength <= 24 ? 0.42 : visualLength <= 56 ? 0.32 : 0.24);
+  const heightCap = box.height * (visualLength <= 24 ? 0.92 : visualLength <= 56 ? 0.76 : 0.62);
+  return clampTextUnitFontSize(Math.min(Math.max(areaFont, heightFloor), heightCap));
+}
+
+function forceReadableAutoTypesetFontSize(text: string, box: RegionBox, currentFontSize?: number) {
+  const compactText = text.replace(/\s+/g, "");
+  const visualLength = Math.max(1, compactText.length + (text.length - compactText.length) * 0.35);
+  const targetByHeight = box.height * (
+    visualLength <= 16 ? 0.78 :
+    visualLength <= 32 ? 0.64 :
+    visualLength <= 56 ? 0.52 :
+    0.42
+  );
+  const currentBoost = currentFontSize ? currentFontSize * TYPESET_FORCE_SCALE : 0;
+  return clampTextUnitFontSize(Math.max(
+    estimateVisualAutoTypesetFontSize(text, box),
+    targetByHeight,
+    currentBoost,
+  ));
+}
+
+function measureAutoTypesetFontSize(
+  measureElement: HTMLDivElement | null,
+  text: string,
+  box: RegionBox,
+  currentFontSize?: number,
+) {
+  void measureElement;
+  const fitSize = measureAutoTypesetFontSizeWithCanvas(text, box);
+  if (fitSize != null) return fitSize;
+  return forceReadableAutoTypesetFontSize(text, box, currentFontSize);
+}
+
 function clampBrushSize(value: number) {
   if (!Number.isFinite(value)) return DEFAULT_BRUSH_SIZE;
   return Math.max(MIN_BRUSH_SIZE, Math.min(MAX_BRUSH_SIZE, Math.round(value)));
@@ -434,6 +626,11 @@ function cleanSettingsFromStrength(strengthValue: number) {
   };
 }
 
+function clampPageWorkers(value: number) {
+  if (!Number.isFinite(value)) return 4;
+  return Math.max(MIN_PAGE_WORKERS, Math.min(MAX_PAGE_WORKERS, Math.round(value)));
+}
+
 function pointsToSvgPath(points: PageEditPoint[]) {
   if (points.length === 0) return "";
   const [first, ...rest] = points;
@@ -447,6 +644,24 @@ function rgbToHex(red: number, green: number, blue: number) {
   return `#${[red, green, blue]
     .map((value) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0"))
     .join("")}`.toUpperCase();
+}
+
+function normalizeHexColor(value: string | undefined, fallback = TYPESET_DARK_TEXT_COLOR) {
+  const color = String(value ?? "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color.toUpperCase();
+  if (/^#[0-9a-f]{3}$/i.test(color)) {
+    const [, r, g, b] = color;
+    return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
+  return fallback;
+}
+
+function relativeLuminance(red: number, green: number, blue: number) {
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+function textColorForBackgroundLuminance(luminance: number) {
+  return luminance < TYPESET_BACKGROUND_DARK_LUMINANCE ? TYPESET_LIGHT_TEXT_COLOR : TYPESET_DARK_TEXT_COLOR;
 }
 
 function loadImageElement(src: string) {
@@ -529,6 +744,88 @@ async function sampleColorFromImageUrl(imageUrl: string, x: number, y: number, w
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
+}
+
+async function createTypesetBackgroundCanvas(page: Page, marks: PageEditMark[]) {
+  if (!page.imageUrl || !isRenderableImageUrl(page.imageUrl)) return null;
+  const image = await loadImageElement(page.imageUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(page.width));
+  canvas.height = Math.max(1, Math.round(page.height));
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  for (const mark of marks) {
+    if (mark.kind === "clean_patch" && mark.region && mark.patchUrl) {
+      try {
+        const patchImage = await loadImageElement(mark.patchUrl);
+        context.globalAlpha = Math.max(0, Math.min(1, mark.opacity ?? 1));
+        context.drawImage(
+          patchImage,
+          mark.region.x,
+          mark.region.y,
+          mark.region.width,
+          mark.region.height,
+        );
+        context.globalAlpha = 1;
+      } catch {
+        context.globalAlpha = 1;
+      }
+      continue;
+    }
+
+    const points = mark.points ?? [];
+    if (points.length >= 2) {
+      context.save();
+      context.globalAlpha = Math.max(0, Math.min(1, mark.opacity ?? 1));
+      context.strokeStyle = normalizeHexColor(mark.color, DEFAULT_BRUSH_COLOR);
+      context.lineWidth = Math.max(1, mark.size ?? DEFAULT_BRUSH_SIZE);
+      context.lineCap = "round";
+      context.lineJoin = "round";
+      context.beginPath();
+      context.moveTo(points[0].x, points[0].y);
+      for (const point of points.slice(1)) context.lineTo(point.x, point.y);
+      context.stroke();
+      context.restore();
+    }
+  }
+
+  return canvas;
+}
+
+function chooseTypesetTextColor(canvas: HTMLCanvasElement | null, box: RegionBox, fallback = TYPESET_DARK_TEXT_COLOR) {
+  if (!canvas) return fallback;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return fallback;
+
+  const insetX = Math.min(Math.max(2, box.width * 0.12), Math.max(2, box.width / 3));
+  const insetY = Math.min(Math.max(2, box.height * 0.12), Math.max(2, box.height / 3));
+  const left = Math.max(0, Math.min(canvas.width - 1, Math.round(box.x + insetX)));
+  const top = Math.max(0, Math.min(canvas.height - 1, Math.round(box.y + insetY)));
+  const right = Math.max(left + 1, Math.min(canvas.width, Math.round(box.x + box.width - insetX)));
+  const bottom = Math.max(top + 1, Math.min(canvas.height, Math.round(box.y + box.height - insetY)));
+  const width = right - left;
+  const height = bottom - top;
+  if (width <= 0 || height <= 0) return fallback;
+
+  const imageData = context.getImageData(left, top, width, height).data;
+  const luminanceSamples: number[] = [];
+  const stride = Math.max(1, Math.floor(Math.sqrt((width * height) / 96)));
+  for (let y = 0; y < height; y += stride) {
+    for (let x = 0; x < width; x += stride) {
+      const index = (y * width + x) * 4;
+      const alpha = imageData[index + 3];
+      if (alpha < 16) continue;
+      luminanceSamples.push(relativeLuminance(imageData[index], imageData[index + 1], imageData[index + 2]));
+    }
+  }
+
+  if (luminanceSamples.length === 0) return fallback;
+  luminanceSamples.sort((first, second) => first - second);
+  const median = luminanceSamples[Math.floor(luminanceSamples.length / 2)];
+  return textColorForBackgroundLuminance(median);
 }
 
 function defaultCreateProjectForm(): CreateProjectFormState {
@@ -2844,11 +3141,14 @@ function TranslationPage() {
   const ocrSelectionRef = useRef<OcrSelectionState | null>(null);
   const cleanSelectionRef = useRef<OcrSelectionState | null>(null);
   const restoreAreaSelectionRef = useRef<OcrSelectionState | null>(null);
+  const autoTypesetMeasureRef = useRef<HTMLDivElement | null>(null);
+  const typesetBackgroundCacheRef = useRef<Map<string, { key: string; promise: Promise<HTMLCanvasElement | null> }>>(new Map());
   const [viewerMode, setViewerMode] = useState<"page" | "webtoon">("page");
   const [mergePages, setMergePages] = useState(false);
   const [originalPanePercent, setOriginalPanePercent] = useState(44);
   const [ocrProviderId, setOcrProviderId] = useState<OcrProviderId>("windows");
   const [ocrLanguageHint, setOcrLanguageHint] = useState("english");
+  const [ocrPageWorkers, setOcrPageWorkers] = useState(4);
   const [replaceOcrText, setReplaceOcrText] = useState(true);
   const [autoCleanOcrText, setAutoCleanOcrText] = useState(false);
   const [autoCleanPolicy, setAutoCleanPolicy] = useState<CleanPolicy>("safe_bubbles_only");
@@ -2864,10 +3164,18 @@ function TranslationPage() {
   const [cleanStrength, setCleanStrength] = useState(DEFAULT_CLEAN_STRENGTH);
   const [cleanMethod, setCleanMethod] = useState<"telea" | "ns">("telea");
   const [cleanProvider, setCleanProvider] = useState<CleanProviderId>("bubble_fill");
+  const [aiScope, setAiScope] = useState<"selected" | "page" | "chapter">("page");
+  const [aiTranslationLevel, setAiTranslationLevel] = useState<TranslationLevel>(3);
   const [microsoftScope, setMicrosoftScope] = useState<"page" | "chapter">("page");
   const [ocrStatus, setOcrStatus] = useState("");
   const [cleanStatus, setCleanStatus] = useState("");
   const [colorPickStatus, setColorPickStatus] = useState("");
+  const [autoTypesetStatus, setAutoTypesetStatus] = useState("");
+  const [aiTranslationStatus, setAiTranslationStatus] = useState("");
+  const [exportStatus, setExportStatus] = useState("");
+  const [henryScope, setHenryScope] = useState<"page" | "chapter" | null>(null);
+  const [henryMenuScope, setHenryMenuScope] = useState<"page" | "chapter" | null>(null);
+  const [henryStatus, setHenryStatus] = useState("");
   const {
     selectedPageId,
     selectedTextUnitId,
@@ -2936,6 +3244,7 @@ function TranslationPage() {
                 typesetting: {
                   ...unit.typesetting,
                   box: result.box,
+                  color: result.color ?? unit.typesetting.color,
                   fontSize: result.fontSize,
                 },
               }
@@ -3098,6 +3407,35 @@ function TranslationPage() {
       queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
     },
   });
+  const aiTranslationMutation = useMutation({
+    mutationFn: translateWithAi,
+    onSuccess: (result) => {
+      setAiTranslationStatus(
+        result.translatedCount > 0
+          ? `AI translated ${result.translatedCount} text unit${result.translatedCount === 1 ? "" : "s"}.`
+          : "AI translation completed without translated text.",
+      );
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+    onError: (error) => {
+      setAiTranslationStatus(error instanceof Error ? error.message : "AI translation failed.");
+    },
+  });
+  const exportChapterMutation = useMutation({
+    mutationFn: (id: string) => exportChapter(id),
+    onSuccess: (result) => {
+      setExportStatus(
+        result.status === "cancelled"
+          ? "Export cancelled."
+          : `Exported ${result.pagesExported} page${result.pagesExported === 1 ? "" : "s"} to ${result.outputPath}`,
+      );
+    },
+    onError: (error) => {
+      setExportStatus(error instanceof Error ? error.message : "Export failed.");
+    },
+  });
   const deleteOcrResultsMutation = useMutation({
     mutationFn: deleteOcrResults,
     onSuccess: (result) => {
@@ -3151,6 +3489,30 @@ function TranslationPage() {
     }
     return groups;
   }, [workspace]);
+  const marksByPageForWorkspace = (targetWorkspace: ChapterTranslationWorkspace) => {
+    const groups = new Map<string, PageEditMark[]>();
+    for (const mark of targetWorkspace.pageEditMarks ?? []) {
+      const group = groups.get(mark.pageId) ?? [];
+      group.push(mark);
+      groups.set(mark.pageId, group);
+    }
+    return groups;
+  };
+  const getTypesetBackgroundCanvas = (page: Page, marks: PageEditMark[]) => {
+    const marksKey = marks
+      .map((mark) => `${mark.id}:${mark.updatedAt}:${mark.kind}:${mark.patchUrl ?? ""}:${mark.color ?? ""}:${mark.size ?? ""}:${mark.opacity ?? ""}`)
+      .join("|");
+    const key = `${page.imageUrl ?? ""}:${page.width}x${page.height}:${marksKey}`;
+    const cached = typesetBackgroundCacheRef.current.get(page.id);
+    if (cached?.key === key) return cached.promise;
+    const promise = createTypesetBackgroundCanvas(page, marks).catch(() => null);
+    typesetBackgroundCacheRef.current.set(page.id, { key, promise });
+    return promise;
+  };
+  const resolveTypesetTextColor = async (page: Page, box: RegionBox, marks: PageEditMark[], fallback?: string) => {
+    const canvas = await getTypesetBackgroundCanvas(page, marks);
+    return chooseTypesetTextColor(canvas, box, normalizeHexColor(fallback, TYPESET_DARK_TEXT_COLOR));
+  };
 
   useEffect(() => {
     if (!workspace) return;
@@ -3299,7 +3661,137 @@ function TranslationPage() {
     workspace.pages.find((page) => page.id === unit.pageId) ?? currentPage;
   const textBoxForUnit = (unit: TextUnit) =>
     textBoxDraft?.textUnitId === unit.id ? textBoxDraft.box : unit.typesetting.box ?? unit.region;
+  const displayFontSizeForUnit = (unit: TextUnit, box = textBoxForUnit(unit)) =>
+    unit.typesetting.isExplicit
+      ? clampTextUnitFontSize(unit.typesetting.fontSize)
+      : measureAutoTypesetFontSize(autoTypesetMeasureRef.current, getOverlayText(unit), box);
   const selectedTextBox = selectedTextUnit ? textBoxForUnit(selectedTextUnit) : undefined;
+  const currentPageTranslatedUnitCount = pageTextUnits.filter((unit) => getAutoTypesetText(unit)).length;
+  const isHenryRunning = henryScope !== null;
+  const isAutoTypesetting = updateTextUnitTypesettingMutation.isPending || isHenryRunning;
+  const calculateAutoPasteTypesetting = async (
+    unit: TextUnit,
+    page: Page,
+    marks: PageEditMark[],
+    translationSource: TypesetTranslationSource = "default",
+  ): Promise<TextUnitTypesettingInput | null> => {
+    const text = getAutoTypesetText(unit, translationSource);
+    if (!text) return null;
+    const box = addAutoPasteComfortToBox(expandAutoTypesetRegion(unit, page, translationSource), page);
+    return {
+      box,
+      color: await resolveTypesetTextColor(page, box, marks),
+      fontSize: measureAutoTypesetFontSize(autoTypesetMeasureRef.current, text, box),
+    };
+  };
+  const calculateAutoTypesetting = async (
+    unit: TextUnit,
+    page: Page,
+    mode: "fit-current-box" | "paste-from-ocr",
+    marks: PageEditMark[] = editMarksByPage.get(page.id) ?? [],
+    translationSource: TypesetTranslationSource = "default",
+  ): Promise<TextUnitTypesettingInput | null> => {
+    const text = getAutoTypesetText(unit, translationSource);
+    if (!text) return null;
+    if (mode === "paste-from-ocr") return calculateAutoPasteTypesetting(unit, page, marks, translationSource);
+    const box = clampTextBoxToPage(textBoxForUnit(unit), page);
+    return {
+      box,
+      color: await resolveTypesetTextColor(page, box, marks),
+      fontSize: measureAutoTypesetFontSize(autoTypesetMeasureRef.current, text, box, unit.typesetting.fontSize),
+    };
+  };
+  const autoTypesetUnits = async (
+    targetWorkspace: ChapterTranslationWorkspace,
+    units: TextUnit[],
+    statusPrefix = "Auto pasting",
+    translationSource: TypesetTranslationSource = "default",
+  ) => {
+    const pagesById = new Map(targetWorkspace.pages.map((page) => [page.id, page]));
+    const targetMarksByPage = marksByPageForWorkspace(targetWorkspace);
+    const jobs: { input: TextUnitTypesettingInput; unit: TextUnit }[] = [];
+    for (const unit of units) {
+      const page = pagesById.get(unit.pageId);
+      if (!page) continue;
+      const input = await calculateAutoPasteTypesetting(unit, page, targetMarksByPage.get(page.id) ?? [], translationSource);
+      if (input) jobs.push({ input, unit });
+    }
+
+    for (let index = 0; index < jobs.length; index += 1) {
+      if (index === 0 || index % 10 === 0) {
+        setAutoTypesetStatus(`${statusPrefix} ${index + 1}/${jobs.length}...`);
+      }
+      await updateTextUnitTypesetting(jobs[index].unit.id, jobs[index].input);
+    }
+
+    return {
+      pasted: jobs.length,
+      skipped: units.length - jobs.length,
+    };
+  };
+  const autoFitSelectedText = async () => {
+    if (!selectedTextUnit || isAutoTypesetting) return;
+    const selectedPage = pageForTextUnit(selectedTextUnit);
+    const input = await calculateAutoTypesetting(
+      selectedTextUnit,
+      selectedPage,
+      "fit-current-box",
+      editMarksByPage.get(selectedPage.id) ?? [],
+    );
+    if (!input) {
+      setAutoTypesetStatus("No translated text on the selected OCR unit.");
+      return;
+    }
+
+    setActiveTool("typeset");
+    setAutoTypesetStatus("Fitting selected text...");
+    try {
+      const result = await updateTextUnitTypesettingMutation.mutateAsync({
+        input,
+        textUnitId: selectedTextUnit.id,
+      });
+      setAutoTypesetStatus(`Selected text fitted at ${result.fontSize}px.`);
+    } catch (error) {
+      setAutoTypesetStatus(error instanceof Error ? error.message : "Failed to fit selected text.");
+    }
+  };
+  const autoPasteCurrentPage = async () => {
+    if (isAutoTypesetting || pageTextUnits.length === 0) return;
+    const jobs: { input: TextUnitTypesettingInput; unit: TextUnit }[] = [];
+    for (const unit of pageTextUnits) {
+      const page = pageForTextUnit(unit);
+      const input = await calculateAutoTypesetting(unit, page, "paste-from-ocr", editMarksByPage.get(page.id) ?? []);
+      if (input) jobs.push({ input, unit });
+    }
+
+    if (jobs.length === 0) {
+      setAutoTypesetStatus("No translated text on this page.");
+      return;
+    }
+
+    setActiveTool("typeset");
+    setAutoTypesetStatus(`Auto pasting ${jobs.length} text boxes...`);
+    try {
+      for (const job of jobs) {
+        await updateTextUnitTypesettingMutation.mutateAsync({
+          input: job.input,
+          textUnitId: job.unit.id,
+        });
+      }
+      const skipped = pageTextUnits.length - jobs.length;
+      const fontSizes = jobs.map((job) => job.input.fontSize ?? 0).filter((fontSize) => fontSize > 0);
+      const fontRange = fontSizes.length > 0
+        ? ` Sizes ${Math.min(...fontSizes)}-${Math.max(...fontSizes)}px.`
+        : "";
+      setAutoTypesetStatus(
+        skipped > 0
+          ? `Auto pasted ${jobs.length}. Skipped ${skipped} without translation.${fontRange}`
+          : `Auto pasted ${jobs.length} text boxes.${fontRange}`,
+      );
+    } catch (error) {
+      setAutoTypesetStatus(error instanceof Error ? error.message : "Auto paste failed.");
+    }
+  };
   const setSelectedTextBox = (box: RegionBox) => {
     if (!selectedTextUnit || updateTextUnitTypesettingMutation.isPending) return;
     const page = pageForTextUnit(selectedTextUnit);
@@ -3320,8 +3812,12 @@ function TranslationPage() {
     setSelectedTextBox(selectedTextUnit.region);
   };
   const commitTextBoxTransform = (textUnitId: string, box: RegionBox) => {
+    const unit = workspace.textUnits.find((item) => item.id === textUnitId);
     updateTextUnitTypesettingMutation.mutate({
-      input: { box },
+      input: {
+        box,
+        ...(unit && !unit.typesetting.isExplicit ? { fontSize: displayFontSizeForUnit(unit, box) } : {}),
+      },
       textUnitId,
     });
   };
@@ -3340,6 +3836,7 @@ function TranslationPage() {
     const startBox = clampTextBoxToPage(textBoxForUnit(unit), page);
     const dragState: TextBoxDragState = {
       currentBox: startBox,
+      didMove: false,
       mode,
       page,
       startBox,
@@ -3355,8 +3852,13 @@ function TranslationPage() {
       const currentDragState = textBoxDragRef.current;
       if (!currentDragState) return;
       moveEvent.preventDefault();
-      const deltaX = (moveEvent.clientX - currentDragState.startClientX) / currentDragState.zoom;
-      const deltaY = (moveEvent.clientY - currentDragState.startClientY) / currentDragState.zoom;
+      const clientDeltaX = moveEvent.clientX - currentDragState.startClientX;
+      const clientDeltaY = moveEvent.clientY - currentDragState.startClientY;
+      const clientDistance = Math.hypot(clientDeltaX, clientDeltaY);
+      if (!currentDragState.didMove && clientDistance < TEXT_BOX_DRAG_THRESHOLD_PX) return;
+      currentDragState.didMove = true;
+      const deltaX = clientDeltaX / currentDragState.zoom;
+      const deltaY = clientDeltaY / currentDragState.zoom;
       const box = transformTextBox(
         currentDragState.mode,
         currentDragState.startBox,
@@ -3374,6 +3876,12 @@ function TranslationPage() {
       document.removeEventListener("pointermove", handleMove);
       document.removeEventListener("pointerup", handleUp);
       if (!currentDragState) return;
+      if (!currentDragState.didMove) {
+        setTextBoxDraft((draft) =>
+          draft?.textUnitId === currentDragState.textUnitId ? null : draft,
+        );
+        return;
+      }
       commitTextBoxTransform(currentDragState.textUnitId, currentDragState.currentBox);
     };
 
@@ -3567,6 +4075,7 @@ function TranslationPage() {
     autoCleanProvider,
     autoCleanText: autoCleanOcrText,
     languageHint: ocrLanguageHint || undefined,
+    parallelPageWorkers: ocrPageWorkers,
     providerId: ocrProviderId,
     replaceExisting: replaceOcrText,
   };
@@ -3575,7 +4084,12 @@ function TranslationPage() {
   const selectedRestoreAreaRegion = normalizeSelectionRegion(restoreAreaSelection);
   const selectedProvider = ocrProvidersQuery.data?.find((provider) => provider.id === ocrProviderId);
   const isOcrRunning =
-    runPageOcrMutation.isPending || runRegionOcrMutation.isPending || runChapterOcrMutation.isPending;
+    isHenryRunning || runPageOcrMutation.isPending || runRegionOcrMutation.isPending || runChapterOcrMutation.isPending;
+  const isHenryBlocked =
+    isOcrRunning ||
+    microsoftTranslationMutation.isPending ||
+    aiTranslationMutation.isPending ||
+    !selectedProvider?.available;
   const ocrError =
     runPageOcrMutation.error instanceof Error
       ? runPageOcrMutation.error.message
@@ -3584,6 +4098,14 @@ function TranslationPage() {
         : runChapterOcrMutation.error instanceof Error
           ? runChapterOcrMutation.error.message
           : null;
+  const henryOcrInput: OcrRunOptions = {
+    ...ocrInput,
+    autoCleanFeather: 2,
+    autoCleanPolicy: "force_all_regions",
+    autoCleanProvider: "algorithm",
+    autoCleanText: true,
+    replaceExisting: true,
+  };
   const runCurrentPageOcr = () => {
     if (!currentPage || isOcrRunning) return;
     setOcrStatus(autoCleanOcrText ? "Running OCR with auto-clean..." : "Running OCR...");
@@ -3605,7 +4127,11 @@ function TranslationPage() {
   };
   const runWholeChapterOcr = () => {
     if (!chapterId || isOcrRunning) return;
-    setOcrStatus(autoCleanOcrText ? "Running chapter OCR with auto-clean..." : "Running chapter OCR...");
+    setOcrStatus(
+      autoCleanOcrText
+        ? `Running chapter OCR with auto-clean using ${ocrPageWorkers} workers...`
+        : `Running chapter OCR using ${ocrPageWorkers} workers...`,
+    );
     runChapterOcrMutation.mutate({ id: chapterId, input: ocrInput });
   };
   const runMicrosoftTranslation = () => {
@@ -3630,6 +4156,130 @@ function TranslationPage() {
       chapterId,
       scope: "chapter",
     });
+  };
+  const runAiTranslation = () => {
+    if (!chapterId || aiTranslationMutation.isPending) return;
+    setAiTranslationStatus("");
+    if (aiScope === "selected") {
+      if (!explicitSelectedTextUnit) {
+        setAiTranslationStatus("No selected OCR text unit.");
+        return;
+      }
+      aiTranslationMutation.mutate({
+        chapterId,
+        mode: "draft",
+        provider: "ai",
+        scope: "text_unit",
+        textUnitId: explicitSelectedTextUnit.id,
+        translationLevel: aiTranslationLevel,
+      });
+      return;
+    }
+    if (aiScope === "page" && currentPage) {
+      aiTranslationMutation.mutate({
+        chapterId,
+        mode: "draft",
+        pageId: currentPage.id,
+        provider: "ai",
+        scope: "page",
+        translationLevel: aiTranslationLevel,
+      });
+      return;
+    }
+    aiTranslationMutation.mutate({
+      chapterId,
+      mode: "draft",
+      provider: "ai",
+      scope: "chapter",
+      translationLevel: aiTranslationLevel,
+    });
+  };
+  const runHenryPipeline = async (scope: "page" | "chapter", translationProvider: HenryTranslationProvider) => {
+    if (
+      !chapterId ||
+      isHenryRunning ||
+      isOcrRunning ||
+      microsoftTranslationMutation.isPending ||
+      aiTranslationMutation.isPending
+    ) return;
+    if (!selectedProvider?.available) {
+      setHenryStatus(selectedProvider?.reason ?? "Selected OCR provider is not available.");
+      return;
+    }
+    if (scope === "page" && !currentPage) {
+      setHenryStatus("No current page selected.");
+      return;
+    }
+
+    const targetPageId = scope === "page" ? currentPage.id : undefined;
+    const henryLabel = scope === "page" ? "Henry page" : "Henry great";
+    const translationLabel = translationProvider === "ai" ? "AI translation" : "Microsoft translation";
+    setHenryScope(scope);
+    setHenryMenuScope(null);
+    setActiveTool("typeset");
+    setAutoCleanOcrText(true);
+    setAutoCleanProvider("algorithm");
+    setAutoCleanPolicy("force_all_regions");
+    setHenryStatus(`${henryLabel}: OCR + algorithm clean...`);
+    setOcrStatus("");
+    setAutoTypesetStatus("");
+
+    try {
+      const ocrResult = scope === "page" && targetPageId
+        ? await runOcrForPage(targetPageId, henryOcrInput)
+        : await runOcrForChapter(chapterId, henryOcrInput);
+      setOcrStatus(ocrResultStatus(ocrResult));
+
+      setHenryStatus(`${henryLabel}: ${translationLabel}...`);
+      const translationResult = translationProvider === "ai"
+        ? await translateWithAi({
+          chapterId,
+          mode: "draft",
+          pageId: targetPageId,
+          provider: "ai",
+          scope,
+          translationLevel: aiTranslationLevel,
+        })
+        : await translateWithMicrosoft({
+          chapterId,
+          pageId: targetPageId,
+          scope,
+        });
+
+      setHenryStatus(`${henryLabel}: auto paste + typeset...`);
+      const translatedWorkspace = await getChapterForTranslation(chapterId);
+      if (!translatedWorkspace) throw new Error(`Translation workspace could not be loaded after ${translationLabel}.`);
+      const targetUnits = scope === "page" && targetPageId
+        ? translatedWorkspace.textUnits.filter((unit) => unit.pageId === targetPageId)
+        : translatedWorkspace.textUnits;
+      const typesetResult = await autoTypesetUnits(
+        translatedWorkspace,
+        targetUnits,
+        `${henryLabel} typesetting`,
+        translationProvider,
+      );
+
+      const finalWorkspace = await getChapterForTranslation(chapterId);
+      if (finalWorkspace) queryClient.setQueryData(["translation-workspace", chapterId], finalWorkspace);
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+
+      setAutoTypesetStatus(
+        typesetResult.skipped > 0
+          ? `Auto pasted ${typesetResult.pasted}. Skipped ${typesetResult.skipped} without translation.`
+          : `Auto pasted ${typesetResult.pasted} text boxes.`,
+      );
+      setHenryStatus(
+        `${henryLabel} completed with ${translationLabel}: ` +
+        `${ocrResult.textUnitsCreated} OCR units, ${translationResult.translatedCount} translated, ${typesetResult.pasted} pasted.`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Henry pipeline failed.";
+      setHenryStatus(message);
+    } finally {
+      setHenryScope(null);
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", chapterId] });
+    }
   };
   const clearChapterOcrResults = () => {
     if (!chapterId || deleteOcrResultsMutation.isPending || workspace.textUnits.length === 0) return;
@@ -3657,6 +4307,12 @@ function TranslationPage() {
     const confirmed = window.confirm("Remove merged pages and return this chapter to original pages?");
     if (!confirmed) return;
     removeMergedPagesMutation.mutate(chapterId);
+  };
+  const runChapterExport = () => {
+    if (!chapterId || exportChapterMutation.isPending || workspace.pages.length === 0) return;
+    setActiveTool("export");
+    setExportStatus("Choosing export folder...");
+    exportChapterMutation.mutate(chapterId);
   };
   const startOcrTextSelection = () => {
     ocrSelectionRef.current = null;
@@ -3853,8 +4509,10 @@ function TranslationPage() {
   });
   const editRegionStyle = (unit: TextUnit) => {
     const box = textBoxForUnit(unit);
+    const fontSize = displayFontSizeForUnit(unit, box);
     return {
-      fontSize: clampTextUnitFontSize(unit.typesetting.fontSize) * zoom,
+      color: normalizeHexColor(unit.typesetting.color, TYPESET_DARK_TEXT_COLOR),
+      fontSize: fontSize * zoom * TYPESET_RENDER_SCALE,
       height: Math.max(MIN_TEXT_BOX_HEIGHT, box.height * zoom),
       left: box.x * zoom,
       top: box.y * zoom,
@@ -4075,7 +4733,7 @@ function TranslationPage() {
       {renderDrawingLayer(page, marks)}
       <div className={activeTool === "draw" || activeTool === "color-picker" || activeTool === "clean" || activeTool === "restore-clean" || activeTool === "restore-area" ? "edit-work-layer is-passive" : "edit-work-layer"}>
         {units.map((unit) => {
-          const label = unit.finalTranslation || unit.microsoftTranslation || unit.aiTranslation || unit.sourceText;
+          const label = getOverlayText(unit);
           const isSelected = unit.id === selectedTextUnit?.id;
           return (
             <div className="edit-text-item" key={unit.id}>
@@ -4127,6 +4785,12 @@ function TranslationPage() {
       ref={translationScreenRef}
       tabIndex={-1}
     >
+      <div
+        aria-hidden="true"
+        className="auto-typeset-measure"
+        dir="rtl"
+        ref={autoTypesetMeasureRef}
+      />
       <header className="translation-topbar">
         <button className="floirs-button floirs-button--icon" onClick={() => navigate(`/projects/${projectId}`)} title="Back">
           <ArrowLeft size={18} />
@@ -4158,6 +4822,17 @@ function TranslationPage() {
               <option key={value || "auto"} value={value}>{label}</option>
             ))}
           </select>
+          <label className="compact-number-field" title="Number of pages processed in parallel for Chapter OCR">
+            <span>Workers</span>
+            <input
+              className="compact-number-input"
+              max={MAX_PAGE_WORKERS}
+              min={MIN_PAGE_WORKERS}
+              onChange={(event) => setOcrPageWorkers(clampPageWorkers(Number(event.target.value)))}
+              type="number"
+              value={ocrPageWorkers}
+            />
+          </label>
           <label className="compact-check" title="Replace existing OCR text units on selected pages">
             <input
               type="checkbox"
@@ -4221,7 +4896,90 @@ function TranslationPage() {
             <X size={15} />
             Unmerge
           </button>
-          <button className="floirs-button"><Sparkles size={15} />AI Translate</button>
+          <div className="henry-provider-picker">
+            <button
+              className={henryMenuScope === "page" ? "floirs-button active-command" : "floirs-button"}
+              disabled={isHenryBlocked}
+              onClick={() => setHenryMenuScope((current) => current === "page" ? null : "page")}
+              title="Choose translation provider for Henry page"
+              type="button"
+            >
+              <Wand2 size={15} />
+              henry page
+              <ChevronDown size={14} />
+            </button>
+            {henryMenuScope === "page" ? (
+              <div className="henry-provider-menu">
+                <button type="button" onClick={() => void runHenryPipeline("page", "microsoft")}>
+                  <Languages size={14} />
+                  Microsoft translation
+                </button>
+                <button type="button" onClick={() => void runHenryPipeline("page", "ai")}>
+                  <Sparkles size={14} />
+                  AI translation
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <div className="henry-provider-picker">
+            <button
+              className={henryMenuScope === "chapter" ? "floirs-button active-command" : "floirs-button"}
+              disabled={isHenryBlocked}
+              onClick={() => setHenryMenuScope((current) => current === "chapter" ? null : "chapter")}
+              title="Choose translation provider for Henry great"
+              type="button"
+            >
+              <Sparkles size={15} />
+              Henry great
+              <ChevronDown size={14} />
+            </button>
+            {henryMenuScope === "chapter" ? (
+              <div className="henry-provider-menu">
+                <button type="button" onClick={() => void runHenryPipeline("chapter", "microsoft")}>
+                  <Languages size={14} />
+                  Microsoft translation
+                </button>
+                <button type="button" onClick={() => void runHenryPipeline("chapter", "ai")}>
+                  <Sparkles size={14} />
+                  AI translation
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <select
+            className="field-select translation-scope-select"
+            disabled={aiTranslationMutation.isPending}
+            onChange={(event) => setAiTranslationLevel(Number(event.target.value) as TranslationLevel)}
+            title="AI Arabic style level"
+            value={aiTranslationLevel}
+          >
+            <option value={1}>AI L1</option>
+            <option value={2}>AI L2</option>
+            <option value={3}>AI L3</option>
+            <option value={4}>AI L4</option>
+            <option value={5}>AI L5</option>
+          </select>
+          <select
+            className="field-select translation-scope-select"
+            disabled={aiTranslationMutation.isPending}
+            onChange={(event) => setAiScope(event.target.value as "selected" | "page" | "chapter")}
+            title="AI translation scope"
+            value={aiScope}
+          >
+            <option value="selected">AI Selected</option>
+            <option value="page">AI Page</option>
+            <option value="chapter">AI Chapter</option>
+          </select>
+          <button
+            className="floirs-button"
+            disabled={aiTranslationMutation.isPending || workspace.textUnits.length === 0}
+            onClick={runAiTranslation}
+            title={`Translate ${aiScope} with AI`}
+            type="button"
+          >
+            {aiTranslationMutation.isPending ? <RefreshCw className="spin" size={15} /> : <Sparkles size={15} />}
+            AI Translate
+          </button>
           <select
             className="field-select translation-scope-select"
             disabled={microsoftTranslationMutation.isPending}
@@ -4243,7 +5001,16 @@ function TranslationPage() {
             Microsoft
           </button>
           <button className="floirs-button"><ShieldCheck size={15} />Quality</button>
-          <button className="floirs-button"><Download size={15} />Export</button>
+          <button
+            className="floirs-button"
+            disabled={exportChapterMutation.isPending || workspace.pages.length === 0}
+            onClick={runChapterExport}
+            title="Export edited chapter pages as PNG files"
+            type="button"
+          >
+            {exportChapterMutation.isPending ? <RefreshCw className="spin" size={15} /> : <Download size={15} />}
+            Export
+          </button>
         </div>
       </header>
 
@@ -4311,12 +5078,33 @@ function TranslationPage() {
           </div>
           {ocrError ? <p className="error-line ocr-status-line">{ocrError}</p> : null}
           {ocrStatus ? <p className="ocr-status-line">{ocrStatus}</p> : null}
-          {isOcrRunning ? <p className="ocr-status-line">Running OCR...</p> : null}
+          {isOcrRunning && !isHenryRunning ? <p className="ocr-status-line">Running OCR...</p> : null}
           {microsoftTranslationMutation.error instanceof Error ? (
             <p className="error-line ocr-status-line">{microsoftTranslationMutation.error.message}</p>
           ) : null}
           {microsoftTranslationMutation.isPending ? (
             <p className="ocr-status-line">Running Microsoft translation...</p>
+          ) : null}
+          {aiTranslationMutation.error instanceof Error ? (
+            <p className="error-line ocr-status-line">{aiTranslationMutation.error.message}</p>
+          ) : null}
+          {aiTranslationMutation.isPending ? (
+            <p className="ocr-status-line">Running AI translation...</p>
+          ) : null}
+          {aiTranslationStatus && !(aiTranslationMutation.error instanceof Error) ? (
+            <p className="ocr-status-line">{aiTranslationStatus}</p>
+          ) : null}
+          {henryStatus ? (
+            <p className="ocr-status-line">{henryStatus}</p>
+          ) : null}
+          {exportChapterMutation.error instanceof Error ? (
+            <p className="error-line ocr-status-line">{exportChapterMutation.error.message}</p>
+          ) : null}
+          {exportChapterMutation.isPending ? (
+            <p className="ocr-status-line">Exporting chapter pages...</p>
+          ) : null}
+          {exportStatus ? (
+            <p className="ocr-status-line">{exportStatus}</p>
           ) : null}
           {deleteOcrResultsMutation.error instanceof Error ? (
             <p className="error-line ocr-status-line">{deleteOcrResultsMutation.error.message}</p>
@@ -4672,6 +5460,33 @@ function TranslationPage() {
               />
             </div>
             {cleanStatus ? <small className="brush-status">{cleanStatus}</small> : null}
+          </div>
+          <div className="tool-panel auto-typeset-panel">
+            <h3>Auto Typeset</h3>
+            <button
+              className="button secondary full-width"
+              disabled={!selectedTextUnit || !getAutoTypesetText(selectedTextUnit) || isAutoTypesetting}
+              onClick={autoFitSelectedText}
+              title="Fit the selected translated text inside its current text box"
+              type="button"
+            >
+              <Type size={15} />
+              Fit selected
+            </button>
+            <button
+              className="button secondary full-width"
+              disabled={currentPageTranslatedUnitCount === 0 || isAutoTypesetting}
+              onClick={autoPasteCurrentPage}
+              title="Place and fit all translated text units on the current page"
+              type="button"
+            >
+              <Wand2 size={15} />
+              Auto paste page
+            </button>
+            <small className="auto-typeset-hint">
+              {currentPageTranslatedUnitCount}/{pageTextUnits.length} translated on current page
+            </small>
+            {autoTypesetStatus ? <small className="brush-status">{autoTypesetStatus}</small> : null}
           </div>
           <div className="tool-panel text-size-panel">
             <h3>Text Size</h3>

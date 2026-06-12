@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "translations": [
+    {
+      "textUnitId": "unit_101",
+      "sourceText": "You came back alive?",
+      "arabicText": "عدت حيًا؟",
+      "confidence": 0.9,
+      "styleLevel": 3,
+      "fit": {
+        "risk": "low",
+        "reason": null
+      },
+      "warnings": [],
+      "usedTerms": [],
+      "notes": []
+    },
+    {
+      "textUnitId": "unit_102",
+      "sourceText": "I told you.",
+      "arabicText": "لقد أخبرتك.",
+      "confidence": 0.93,
+      "styleLevel": 3,
+      "fit": {
+        "risk": "low",
+        "reason": null
+      },
+      "warnings": [],
+      "usedTerms": [],
+      "notes": []
+    },
+    {
+      "textUnitId": "unit_103",
+      "sourceText": "Shadow Step was never meant for escape.",
+      "arabicText": "لم تكن خطوة الظل مخصصة للهرب قط.",
+      "confidence": 0.95,
+      "styleLevel": 3,
+      "fit": {
+        "risk": "medium",
+        "reason": "Arabic term is fixed by glossary and makes the sentence slightly longer."
+      },
+      "warnings": [],
+      "usedTerms": [
+        {
+          "source": "Shadow Step",
+          "arabic": "خطوة الظل",
+          "type": "term"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "glossarySuggestions": [],
+  "runWarnings": []
+}

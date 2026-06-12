@@ -2,9 +2,15 @@ const { PageCleanService } = require("./page-clean-service.cjs");
 const { OcrProviderRegistry } = require("../ocr/provider-registry.cjs");
 const { OcrRepository } = require("../data/repositories/ocr-repository.cjs");
 
+const DEFAULT_PARALLEL_PAGE_WORKERS = 4;
+const MAX_PARALLEL_PAGE_WORKERS = 12;
+const MAX_ALGORITHM_CLEAN_WORKERS = 4;
+const MAX_LAMA_CLEAN_WORKERS = 2;
+
 function normalizeRunOptions(input) {
   const maskExpansion = Number(input?.autoCleanMaskExpansion ?? 4);
   const feather = Number(input?.autoCleanFeather ?? 2);
+  const providerId = String(input?.providerId ?? "windows");
   return {
     autoCleanPolicy: String(input?.autoCleanPolicy ?? "safe_bubbles_only"),
     autoCleanProvider: String(input?.autoCleanProvider ?? "bubble_fill"),
@@ -15,9 +21,50 @@ function normalizeRunOptions(input) {
     },
     autoCleanText: input?.autoCleanText === true,
     languageHint: String(input?.languageHint ?? "").trim() || undefined,
-    providerId: String(input?.providerId ?? "windows"),
+    parallelPageWorkers: normalizeParallelPageWorkers(input?.parallelPageWorkers, defaultParallelPageWorkers(providerId)),
+    providerId,
     replaceExisting: input?.replaceExisting !== false,
   };
+}
+
+function defaultParallelPageWorkers(providerId) {
+  const provider = String(providerId ?? "").toLowerCase();
+  if (provider === "easyocr" || provider === "doctr" || provider === "manga-ocr") return 2;
+  return DEFAULT_PARALLEL_PAGE_WORKERS;
+}
+
+function normalizeParallelPageWorkers(value, fallback = DEFAULT_PARALLEL_PAGE_WORKERS) {
+  const parsed = Number(value ?? fallback);
+  const safe = Number.isFinite(parsed) ? Math.round(parsed) : fallback;
+  return clamp(safe, 1, MAX_PARALLEL_PAGE_WORKERS);
+}
+
+function cleanWorkerLimit(provider, requestedWorkers) {
+  const requested = normalizeParallelPageWorkers(requestedWorkers);
+  if (provider === "lama") {
+    return Math.min(MAX_LAMA_CLEAN_WORKERS, requested);
+  }
+  if (provider === "algorithm") {
+    return Math.min(MAX_ALGORITHM_CLEAN_WORKERS, requested);
+  }
+  return requested;
+}
+
+async function mapWithConcurrency(items, concurrency, task) {
+  const workersCount = Math.min(normalizeParallelPageWorkers(concurrency), items.length);
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await task(items[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(Array.from({ length: workersCount }, () => worker()));
+  return results;
 }
 
 function numberOrZero(value) {
@@ -157,55 +204,75 @@ class OcrService {
     return this.registry.listProviderStatuses(languageHint);
   }
 
-  async autoCleanTargets(cleanTargets, { policy, provider, run, settings, source }) {
-    const cleanErrors = [];
-    const cleanedRegions = new Set();
-    let cleanPatchesCreated = 0;
-    let cleanSkipped = 0;
-
+  async autoCleanTargets(cleanTargets, { pageWorkers, policy, provider, run, settings, source }) {
+    const targetsByPage = new Map();
     for (const target of cleanTargets) {
       const pageId = target?.page?.pageId ?? target?.pageId;
       const region = target?.region;
       if (!pageId || !region || !target?.page) continue;
-
-      const regionKey = [
-        pageId,
-        Math.round(Number(region.x ?? 0)),
-        Math.round(Number(region.y ?? 0)),
-        Math.round(Number(region.width ?? 0)),
-        Math.round(Number(region.height ?? 0)),
-      ].join(":");
-      if (cleanedRegions.has(regionKey)) continue;
-      cleanedRegions.add(regionKey);
-
-      try {
-        const regions = autoCleanRegions(region, target.page, provider);
-        const cleanResult = await this.cleanService.cleanText(pageId, {
-          ...settings,
-          maskRegion: regions.maskRegion,
-          mode: "auto_after_ocr",
-          policy,
-          provider,
-          region: regions.region,
-          source,
-          sourceOcrRunId: run.id,
-          sourceTextUnitId: target.id,
-        });
-        if (cleanResult?.skipped) {
-          cleanSkipped += 1;
-        } else {
-          cleanPatchesCreated += 1;
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        cleanErrors.push(`Page ${target.page.pageIndex + 1}: ${message}`);
-      }
+      if (!targetsByPage.has(pageId)) targetsByPage.set(pageId, []);
+      targetsByPage.get(pageId).push(target);
     }
 
+    const pageGroups = Array.from(targetsByPage.values());
+    const groupResults = await mapWithConcurrency(
+      pageGroups,
+      cleanWorkerLimit(provider, pageWorkers),
+      async (targets) => {
+        const cleanErrors = [];
+        const cleanedRegions = new Set();
+        let cleanPatchesCreated = 0;
+        let cleanSkipped = 0;
+
+        for (const target of targets) {
+          const pageId = target.page.pageId;
+          const region = target.region;
+          const regionKey = [
+            pageId,
+            Math.round(Number(region.x ?? 0)),
+            Math.round(Number(region.y ?? 0)),
+            Math.round(Number(region.width ?? 0)),
+            Math.round(Number(region.height ?? 0)),
+          ].join(":");
+          if (cleanedRegions.has(regionKey)) continue;
+          cleanedRegions.add(regionKey);
+
+          try {
+            const regions = autoCleanRegions(region, target.page, provider);
+            const cleanResult = await this.cleanService.cleanText(pageId, {
+              ...settings,
+              maskRegion: regions.maskRegion,
+              mode: "auto_after_ocr",
+              policy,
+              provider,
+              region: regions.region,
+              source,
+              sourceOcrRunId: run.id,
+              sourceTextUnitId: target.id,
+            });
+            if (cleanResult?.skipped) {
+              cleanSkipped += 1;
+            } else {
+              cleanPatchesCreated += 1;
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            cleanErrors.push(`Page ${target.page.pageIndex + 1}: ${message}`);
+          }
+        }
+
+        return {
+          cleanErrors,
+          cleanPatchesCreated,
+          cleanSkipped,
+        };
+      },
+    );
+
     return {
-      cleanErrors: cleanErrors.slice(0, 5),
-      cleanPatchesCreated,
-      cleanSkipped,
+      cleanErrors: groupResults.flatMap((result) => result.cleanErrors).slice(0, 5),
+      cleanPatchesCreated: groupResults.reduce((sum, result) => sum + result.cleanPatchesCreated, 0),
+      cleanSkipped: groupResults.reduce((sum, result) => sum + result.cleanSkipped, 0),
     };
   }
 
@@ -215,6 +282,7 @@ class OcrService {
     autoCleanSettings,
     autoCleanText,
     languageDetected,
+    pageWorkers,
     pageResults,
     provider,
     replaceExisting,
@@ -232,6 +300,7 @@ class OcrService {
     if (!autoCleanText) return summary;
 
     const cleanSummary = await this.autoCleanTargets(summary.createdTextUnits ?? [], {
+      pageWorkers,
       policy: autoCleanPolicy,
       provider: autoCleanProvider,
       run,
@@ -271,6 +340,7 @@ class OcrService {
         autoCleanSettings: options.autoCleanSettings,
         autoCleanText: options.autoCleanText,
         languageDetected: result.languageDetected,
+        pageWorkers: 1,
         pageResults: [{ items: result.items, page }],
         provider: result.providerId ?? options.providerId,
         replaceExisting: options.replaceExisting,
@@ -334,6 +404,7 @@ class OcrService {
         autoCleanSettings: options.autoCleanSettings,
         autoCleanText: options.autoCleanText,
         languageDetected: result.languageDetected,
+        pageWorkers: 1,
         pageResults: [{ items: recognizedItems, page, replaceRegion: selectedRegion }],
         provider: result.providerId ?? options.providerId,
         replaceExisting: options.replaceExisting,
@@ -364,20 +435,24 @@ class OcrService {
         autoCleanSettings: options.autoCleanSettings,
         autoCleanText: options.autoCleanText,
         pagesCount: pages.length,
+        parallelPageWorkers: options.parallelPageWorkers,
         replaceExisting: options.replaceExisting,
       },
     });
 
     try {
-      const pageResults = [];
-      let languageDetected = null;
-      for (const page of pages) {
+      const pageResults = await mapWithConcurrency(pages, options.parallelPageWorkers, async (page) => {
         const result = await this.registry.recognizePage(options.providerId, page, {
           languageHint: options.languageHint,
         });
-        if (!languageDetected && result.languageDetected) languageDetected = result.languageDetected;
-        pageResults.push({ items: result.items, page, provider: result.providerId ?? options.providerId });
-      }
+        return {
+          items: result.items,
+          languageDetected: result.languageDetected ?? null,
+          page,
+          provider: result.providerId ?? options.providerId,
+        };
+      });
+      const languageDetected = pageResults.find((pageResult) => pageResult.languageDetected)?.languageDetected ?? null;
 
       return this.applyRecognitionWithOptionalClean({
         autoCleanPolicy: options.autoCleanPolicy,
@@ -385,6 +460,7 @@ class OcrService {
         autoCleanSettings: options.autoCleanSettings,
         autoCleanText: options.autoCleanText,
         languageDetected,
+        pageWorkers: options.parallelPageWorkers,
         pageResults,
         provider: pageResults.find((pageResult) => pageResult.provider !== options.providerId)?.provider ?? options.providerId,
         replaceExisting: options.replaceExisting,

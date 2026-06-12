@@ -1,0 +1,136 @@
+{
+  "version": "1.0",
+  "job": {
+    "scope": "chapter",
+    "mode": "draft",
+    "sourceLanguage": "en",
+    "targetLanguage": "ar",
+    "translationLevel": 3,
+    "applyGlossaryStrictly": true,
+    "preferConciseBubbleText": true
+  },
+  "project": {
+    "projectId": "project_demo",
+    "title": "Demo Manhwa",
+    "arabicTitle": "مانهوا تجريبية",
+    "synopsis": "A revenge fantasy story about a fallen knight.",
+    "genre": "fantasy action",
+    "toneNotes": "Serious action with concise dialogue.",
+    "translationNotes": "Keep skill names consistent."
+  },
+  "chapter": {
+    "chapterId": "chapter_007",
+    "title": "Return",
+    "chapterNumber": 7,
+    "summary": "Arin returns to the fortress and confronts the commander.",
+    "previousSummary": "Arin survived an ambush and learned who betrayed him.",
+    "sceneNotes": "Tense confrontation."
+  },
+  "glossary": {
+    "characters": [
+      {
+        "id": "char_arin",
+        "englishName": "Arin",
+        "arabicName": "آرين",
+        "gender": "Male",
+        "aliases": [],
+        "description": "Main character. Calm and direct."
+      },
+      {
+        "id": "char_luna",
+        "englishName": "Luna",
+        "arabicName": "لونا",
+        "gender": "Female",
+        "aliases": [],
+        "description": "A strategist allied with Arin."
+      }
+    ],
+    "terms": [
+      {
+        "id": "term_shadow_step",
+        "englishTerm": "Shadow Step",
+        "arabicTerm": "خطوة الظل",
+        "category": "Skill",
+        "description": "A movement skill. Use this exact Arabic term."
+      }
+    ]
+  },
+  "units": [
+    {
+      "textUnitId": "unit_101",
+      "pageId": "page_010",
+      "pageIndex": 9,
+      "sequenceIndex": 0,
+      "sourceText": "You came back alive?",
+      "normalizedSourceText": "You came back alive?",
+      "ocrConfidence": 0.98,
+      "speakerCharacterId": null,
+      "microsoftTranslation": "لقد عدت على قيد الحياة؟",
+      "currentArabicText": null,
+      "boundingBox": null,
+      "neighboringText": {
+        "previous": [],
+        "next": [
+          {
+            "textUnitId": "unit_102",
+            "sourceText": "I told you.",
+            "arabicText": null
+          }
+        ]
+      }
+    },
+    {
+      "textUnitId": "unit_102",
+      "pageId": "page_010",
+      "pageIndex": 9,
+      "sequenceIndex": 1,
+      "sourceText": "I told you.",
+      "normalizedSourceText": "I told you.",
+      "ocrConfidence": 0.98,
+      "speakerCharacterId": "char_arin",
+      "microsoftTranslation": "قلت لك.",
+      "currentArabicText": null,
+      "boundingBox": null,
+      "neighboringText": {
+        "previous": [
+          {
+            "textUnitId": "unit_101",
+            "sourceText": "You came back alive?",
+            "arabicText": null
+          }
+        ],
+        "next": [
+          {
+            "textUnitId": "unit_103",
+            "sourceText": "Shadow Step was never meant for escape.",
+            "arabicText": null
+          }
+        ]
+      }
+    },
+    {
+      "textUnitId": "unit_103",
+      "pageId": "page_010",
+      "pageIndex": 9,
+      "sequenceIndex": 2,
+      "sourceText": "Shadow Step was never meant for escape.",
+      "normalizedSourceText": "Shadow Step was never meant for escape.",
+      "ocrConfidence": 0.97,
+      "speakerCharacterId": "char_arin",
+      "microsoftTranslation": "لم يكن المقصود من خطوة الظل الهروب أبدا.",
+      "currentArabicText": null,
+      "boundingBox": null,
+      "neighboringText": {
+        "previous": [
+          {
+            "textUnitId": "unit_102",
+            "sourceText": "I told you.",
+            "arabicText": null
+          }
+        ],
+        "next": []
+      }
+    }
+  ],
+  "previousTranslations": []
+}

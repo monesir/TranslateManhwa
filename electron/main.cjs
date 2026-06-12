@@ -6,9 +6,16 @@ const { PAGE_CACHE_HOST } = require("./data/chapter-page-store.cjs");
 const { COVER_CACHE_HOST, COVER_CACHE_SCHEME } = require("./data/cover-cache.cjs");
 const { createDatabase } = require("./data/database.cjs");
 const { registerIpcHandlers } = require("./ipc.cjs");
+const {
+  applyElectronRuntimePaths,
+  applyRuntimeEnvironment,
+  getRuntimePaths,
+} = require("./runtime-paths.cjs");
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 let databaseHandle;
+const runtimePaths = applyRuntimeEnvironment(getRuntimePaths());
+applyElectronRuntimePaths(app, runtimePaths);
 
 protocol.registerSchemesAsPrivileged([
   {

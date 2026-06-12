@@ -109,7 +109,17 @@ function normalizeTextUnitFontSize(value) {
   if (value == null || value === "") return 18;
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 18;
-  return Math.max(8, Math.min(72, numeric));
+  return Math.max(8, Math.min(360, numeric));
+}
+
+function normalizeTextUnitColor(value) {
+  const color = String(value ?? "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color.toUpperCase();
+  if (/^#[0-9a-f]{3}$/i.test(color)) {
+    const [, r, g, b] = color;
+    return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
+  return undefined;
 }
 
 function normalizeTextUnitBox(value, fallback) {
@@ -131,6 +141,11 @@ function normalizeTextUnitBox(value, fallback) {
 
 function mapTextUnitRow(row) {
   const region = parseJson(row.region_json, { type: "box", x: 0, y: 0, width: 120, height: 60 });
+  const typesettingStyle = parseJson(row.typesetting_style_json, {});
+  const hasExplicitTypesetting =
+    row.typesetting_font_size != null ||
+    row.typesetting_box_json != null ||
+    row.typesetting_style_json != null;
   return {
     id: row.id,
     chapterId: row.chapter_id,
@@ -152,7 +167,9 @@ function mapTextUnitRow(row) {
     cleanReason: row.clean_reason ?? undefined,
     typesetting: {
       box: normalizeTextUnitBox(row.typesetting_box_json, region),
+      color: normalizeTextUnitColor(typesettingStyle.color),
       fontSize: normalizeTextUnitFontSize(row.typesetting_font_size),
+      isExplicit: hasExplicitTypesetting,
     },
   };
 }

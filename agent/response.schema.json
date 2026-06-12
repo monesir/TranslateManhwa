@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://florismnhar.local/agent/response.schema.json",
+  "title": "FlorisMNHar AI Translation Response",
+  "type": "object",
+  "required": ["version", "translations", "glossarySuggestions", "runWarnings"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "translations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/translation"
+      }
+    },
+    "glossarySuggestions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/glossarySuggestion"
+      }
+    },
+    "runWarnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/warning"
+      }
+    }
+  },
+  "$defs": {
+    "translation": {
+      "type": "object",
+      "required": [
+        "textUnitId",
+        "sourceText",
+        "arabicText",
+        "confidence",
+        "warnings",
+        "usedTerms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "textUnitId": {
+          "type": "string"
+        },
+        "sourceText": {
+          "type": "string"
+        },
+        "arabicText": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "styleLevel": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 5
+        },
+        "fit": {
+          "type": "object",
+          "required": ["risk"],
+          "additionalProperties": false,
+          "properties": {
+            "risk": {
+              "type": "string",
+              "enum": ["low", "medium", "high"]
+            },
+            "reason": {
+              "type": ["string", "null"]
+            }
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/warning"
+          }
+        },
+        "usedTerms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["source", "arabic"],
+            "additionalProperties": false,
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "arabic": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["character", "term", "alias", "inferred"]
+              }
+            }
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      }
+    },
+    "glossarySuggestion": {
+      "type": "object",
+      "required": ["kind", "source", "arabic", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["character", "term"]
+        },
+        "source": {
+          "type": "string"
+        },
+        "arabic": {
+          "type": "string"
+        },
+        "category": {
+          "type": ["string", "null"]
+        },
+        "gender": {
+          "type": ["string", "null"],
+          "enum": ["Male", "Female", "Unknown", null]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "warning": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "textUnitId": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

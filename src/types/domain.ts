@@ -319,7 +319,9 @@ export interface PageEditMarkInput {
 
 export interface TextUnitTypesetting {
   box: RegionBox;
+  color?: string;
   fontSize: number;
+  isExplicit?: boolean;
 }
 
 export interface TextUnit {
@@ -387,6 +389,7 @@ export interface OcrRunOptions {
   autoCleanProvider?: CleanProviderId;
   autoCleanMaskExpansion?: number;
   autoCleanFeather?: number;
+  parallelPageWorkers?: number;
 }
 
 export interface OcrRegionExpansion {
@@ -423,6 +426,7 @@ export interface UpdateTextUnitSourceInput {
 
 export interface TextUnitTypesettingInput {
   box?: RegionBox;
+  color?: string;
   fontSize?: number;
 }
 
@@ -542,6 +546,30 @@ export interface TranslateTextUnitsInput {
   targetLanguage?: string;
 }
 
+export type TranslationLevel = 1 | 2 | 3 | 4 | 5;
+
+export interface AiTranslationProviderStatus {
+  id: string;
+  label: string;
+  model: string;
+  available: boolean;
+  activeKeyId?: string | null;
+  keyCount?: number;
+  reason?: string | null;
+  requires?: string | null;
+}
+
+export interface TranslateWithAiInput extends Omit<TranslateTextUnitsInput, "provider"> {
+  aiProvider?: "openai_compatible" | string;
+  applyGlossaryStrictly?: boolean;
+  batchSize?: number;
+  mode?: "draft" | "revise" | "final";
+  model?: string;
+  preferConciseBubbleText?: boolean;
+  provider?: "ai";
+  translationLevel?: TranslationLevel;
+}
+
 export interface TranslateTextUnitsResult {
   chapterId: string;
   provider: "microsoft" | string;
@@ -550,6 +578,15 @@ export interface TranslateTextUnitsResult {
   translatedCount: number;
   failedCount: number;
   errorMessage?: string;
+}
+
+export interface ChapterExportResult {
+  chapterId: string;
+  files: string[];
+  kind: "chapter_pages_png" | string;
+  outputPath: string;
+  pagesExported: number;
+  status: "completed" | "cancelled" | "failed";
 }
 
 export interface MergeChapterPagesInput {

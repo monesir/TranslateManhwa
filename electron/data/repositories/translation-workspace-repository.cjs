@@ -9,7 +9,7 @@ const { DictionaryRepository } = require("./dictionary-repository.cjs");
 
 const DEFAULT_TEXT_UNIT_FONT_SIZE = 18;
 const MIN_TEXT_UNIT_FONT_SIZE = 8;
-const MAX_TEXT_UNIT_FONT_SIZE = 72;
+const MAX_TEXT_UNIT_FONT_SIZE = 360;
 const MIN_TEXT_BOX_WIDTH = 16;
 const MIN_TEXT_BOX_HEIGHT = 12;
 const MIN_BRUSH_SIZE = 1;
@@ -103,6 +103,16 @@ function normalizeColor(value) {
     return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
   }
   return "#FFFFFF";
+}
+
+function normalizeOptionalColor(value, fallback = undefined) {
+  const color = String(value ?? "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color.toUpperCase();
+  if (/^#[0-9a-f]{3}$/i.test(color)) {
+    const [, r, g, b] = color;
+    return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
+  return fallback;
 }
 
 function normalizeEditPoints(points, pageWidth, pageHeight) {
@@ -350,6 +360,13 @@ class TranslationWorkspaceRepository {
           LIMIT 1
         ) AS typesetting_box_json,
         (
+          SELECT ti.style_json
+          FROM typesetting_items ti
+          WHERE ti.text_unit_id = tu.id
+          ORDER BY ti.updated_at DESC
+          LIMIT 1
+        ) AS typesetting_style_json,
+        (
           SELECT ca.status
           FROM clean_attempts ca
           WHERE ca.text_unit_id = tu.id
@@ -519,7 +536,14 @@ class TranslationWorkspaceRepository {
           WHERE ti.text_unit_id = tu.id
           ORDER BY ti.updated_at DESC
           LIMIT 1
-        ) AS typesetting_box_json
+        ) AS typesetting_box_json,
+        (
+          SELECT ti.style_json
+          FROM typesetting_items ti
+          WHERE ti.text_unit_id = tu.id
+          ORDER BY ti.updated_at DESC
+          LIMIT 1
+        ) AS typesetting_style_json
       FROM text_units tu
       WHERE tu.id = ?
     `).get(textUnitId);
@@ -589,6 +613,7 @@ class TranslationWorkspaceRepository {
         p.height AS page_height,
         ti.font_size,
         ti.box_json,
+        ti.style_json,
         pms.merged_page_id,
         pms.x AS merge_offset_x,
         pms.y AS merge_offset_y
@@ -611,6 +636,9 @@ class TranslationWorkspaceRepository {
     });
     const hasFontSize = nextInput.fontSize != null;
     const hasBox = nextInput.box != null;
+    const hasColor = nextInput.color != null;
+    const currentStyle = parseJson(row.style_json, {});
+    const currentColor = normalizeOptionalColor(currentStyle.color);
     const offsetX = row.merged_page_id ? Number(row.merge_offset_x ?? 0) : 0;
     const offsetY = row.merged_page_id ? Number(row.merge_offset_y ?? 0) : 0;
     const inputBox = nextInput.box && row.merged_page_id
@@ -628,6 +656,7 @@ class TranslationWorkspaceRepository {
         row.page_height,
       ),
       fontSize: normalizeFontSize(hasFontSize ? nextInput.fontSize : row.font_size),
+      color: normalizeOptionalColor(hasColor ? nextInput.color : currentColor, currentColor ?? "#17110B"),
     };
   }
 
@@ -690,6 +719,7 @@ class TranslationWorkspaceRepository {
     return {
       box: displayBox,
       chapterId: existing.chapter_id,
+      color: typesetting.color,
       fontSize: typesetting.fontSize,
       id: textUnitId,
     };
@@ -821,7 +851,8 @@ class TranslationWorkspaceRepository {
         p.width AS page_width,
         p.height AS page_height,
         ti.font_size,
-        ti.box_json
+        ti.box_json,
+        ti.style_json
       FROM text_units tu
       JOIN pages p ON p.id = tu.page_id
       LEFT JOIN typesetting_items ti ON ti.id = 'typesetting_' || tu.id

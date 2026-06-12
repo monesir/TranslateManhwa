@@ -5,11 +5,14 @@ const path = require("node:path");
 const { promisify } = require("node:util");
 const { PAGE_CACHE_HOST } = require("../data/chapter-page-store.cjs");
 const { COVER_CACHE_SCHEME, sanitizeFilePart } = require("../data/cover-cache.cjs");
+const { getRuntimePaths, pythonRuntimeEnv } = require("../runtime-paths.cjs");
 
 const execFileAsync = promisify(execFile);
 const SMART_CLEAN_SCRIPT = path.join(__dirname, "..", "ocr", "scripts", "smart-clean-text.py");
 const RESTORE_CLEAN_PATCH_SCRIPT = path.join(__dirname, "..", "ocr", "scripts", "restore-clean-patch.py");
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const RUNTIME_PATHS = getRuntimePaths();
+const REPO_ROOT = RUNTIME_PATHS.repoRoot;
+const DEFAULT_OCR_PYTHON = path.join(REPO_ROOT, ".venv-ocr", "Scripts", "python.exe");
 const DEFAULT_LAMA_PYTHON = path.join(REPO_ROOT, ".venv-lama", "Scripts", "python.exe");
 
 function assertInsideWorkspace(workspacePath, candidatePath) {
@@ -75,6 +78,12 @@ function resolveProviderPython(provider, fallbackPython) {
       "Create it with: python -m venv --system-site-packages .venv-lama; " +
       ".\\.venv-lama\\Scripts\\python.exe -m pip install simple-lama-inpainting",
   );
+}
+
+function resolveBasePython() {
+  if (process.env.FLORIS_PYTHON) return process.env.FLORIS_PYTHON;
+  if (fs.existsSync(DEFAULT_OCR_PYTHON)) return DEFAULT_OCR_PYTHON;
+  return "python";
 }
 
 function normalizePolicy(value) {
@@ -247,7 +256,7 @@ class PageCleanService {
   constructor(db, options = {}) {
     this.db = db;
     this.workspacePath = options.workspacePath;
-    this.pythonCommand = options.pythonCommand || process.env.FLORIS_PYTHON || "python";
+    this.pythonCommand = options.pythonCommand || resolveBasePython();
   }
 
   getPage(pageId) {
@@ -400,6 +409,7 @@ class PageCleanService {
           "classify",
         ],
         {
+          env: pythonRuntimeEnv(process.env, RUNTIME_PATHS),
           maxBuffer: 1024 * 1024,
           windowsHide: true,
         },
@@ -515,6 +525,7 @@ class PageCleanService {
           maskRegion ? String(maskRegion.height) : "",
         ],
         {
+          env: pythonRuntimeEnv(process.env, RUNTIME_PATHS),
           maxBuffer: 1024 * 1024,
           windowsHide: true,
         },
@@ -652,6 +663,7 @@ class PageCleanService {
           String(feather),
         ],
         {
+          env: pythonRuntimeEnv(process.env, RUNTIME_PATHS),
           maxBuffer: 1024 * 1024,
           windowsHide: true,
         },

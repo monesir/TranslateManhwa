@@ -1,13 +1,23 @@
 const { execFile } = require("node:child_process");
+const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const { promisify } = require("node:util");
 const { PAGE_CACHE_HOST } = require("../data/chapter-page-store.cjs");
 const { COVER_CACHE_SCHEME, sanitizeFilePart } = require("../data/cover-cache.cjs");
+const { getRuntimePaths, pythonRuntimeEnv } = require("../runtime-paths.cjs");
 
 const execFileAsync = promisify(execFile);
+const RUNTIME_PATHS = getRuntimePaths();
 const MERGE_PAGES_SCRIPT = path.join(__dirname, "..", "ocr", "scripts", "merge-pages.py");
+const DEFAULT_OCR_PYTHON = path.join(RUNTIME_PATHS.repoRoot, ".venv-ocr", "Scripts", "python.exe");
 const MERGED_PAGE_INDEX_OFFSET = 100000;
+
+function resolvePythonCommand() {
+  if (process.env.FLORIS_PYTHON) return process.env.FLORIS_PYTHON;
+  if (fs.existsSync(DEFAULT_OCR_PYTHON)) return DEFAULT_OCR_PYTHON;
+  return "python";
+}
 
 function assertInsideWorkspace(workspacePath, candidatePath) {
   const workspaceRoot = path.resolve(workspacePath);
@@ -48,7 +58,7 @@ class PageMergeService {
   constructor(db, options = {}) {
     this.db = db;
     this.workspacePath = options.workspacePath;
-    this.pythonCommand = options.pythonCommand || process.env.FLORIS_PYTHON || "python";
+    this.pythonCommand = options.pythonCommand || resolvePythonCommand();
   }
 
   listOriginalPages(chapterId) {
@@ -167,6 +177,7 @@ class PageMergeService {
       let metadata;
       try {
         const result = await execFileAsync(this.pythonCommand, [MERGE_PAGES_SCRIPT, manifestPath], {
+          env: pythonRuntimeEnv(process.env, RUNTIME_PATHS),
           maxBuffer: 1024 * 1024,
           windowsHide: true,
         });

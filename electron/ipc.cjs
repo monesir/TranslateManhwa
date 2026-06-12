@@ -57,6 +57,27 @@ function registerIpcHandlers(appApi) {
       appApi.restoreCleanPatchArea(markId, input),
     "translation:microsoft": (_event, input) =>
       appApi.translateWithMicrosoft(input),
+    "translation:aiProviders": (_event, input) =>
+      appApi.listAiTranslationProviders(input),
+    "translation:ai": (_event, input) =>
+      appApi.translateWithAi(input),
+    "export:chapter": async (_event, chapterId) => {
+      const result = await dialog.showOpenDialog({
+        title: "Choose export folder",
+        properties: ["openDirectory", "createDirectory"],
+      });
+      if (result.canceled || !result.filePaths[0]) {
+        return {
+          chapterId,
+          files: [],
+          kind: "chapter_pages_png",
+          outputPath: "",
+          pagesExported: 0,
+          status: "cancelled",
+        };
+      }
+      return appApi.exportChapter(chapterId, { outputDirectory: result.filePaths[0] });
+    },
     "pages:mergeChapter": (_event, chapterId, input) =>
       appApi.mergeChapterPages(chapterId, input),
     "pages:removeMerged": (_event, chapterId) =>

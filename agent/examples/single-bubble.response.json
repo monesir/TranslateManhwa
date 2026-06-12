@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "translations": [
+    {
+      "textUnitId": "unit_001",
+      "sourceText": "I AM NOT THE\nONE WHO WILL BE\nKILLING YOU.",
+      "arabicText": "لست أنا من سيقتلك.",
+      "confidence": 0.94,
+      "styleLevel": 3,
+      "fit": {
+        "risk": "low",
+        "reason": null
+      },
+      "warnings": [],
+      "usedTerms": [],
+      "notes": [
+        "Microsoft candidate was ignored because it treated OCR lines as disconnected phrasing."
+      ]
+    }
+  ],
+  "glossarySuggestions": [],
+  "runWarnings": []
+}
