@@ -194,9 +194,11 @@ function isAutoCleanPatch(mark: PageEditMark) {
 function ocrResultStatus(result: OcrRunResult) {
   const cleanPatches = result.cleanPatchesCreated ?? 0;
   const cleanSkipped = result.cleanSkipped ?? 0;
+  const cleanFallbacks = result.cleanFallbacksApplied ?? 0;
   const cleanErrors = result.cleanErrors?.length ? `, ${result.cleanErrors.length} clean errors` : "";
-  if (cleanPatches > 0 || cleanSkipped > 0 || cleanErrors) {
-    return `OCR created ${result.textUnitsCreated} text units. Auto-clean applied ${cleanPatches}, skipped ${cleanSkipped}${cleanErrors}.`;
+  const fallbackText = cleanFallbacks > 0 ? `, fallback ${cleanFallbacks}` : "";
+  if (cleanPatches > 0 || cleanSkipped > 0 || cleanFallbacks > 0 || cleanErrors) {
+    return `OCR created ${result.textUnitsCreated} text units. Auto-clean applied ${cleanPatches}, skipped ${cleanSkipped}${fallbackText}${cleanErrors}.`;
   }
   return `OCR created ${result.textUnitsCreated} text units.`;
 }
@@ -361,6 +363,8 @@ const TYPESET_MEASURE_PADDING_X = 5;
 const TYPESET_MEASURE_PADDING_Y = 4;
 const AUTO_PASTE_BOX_COMFORT_SCALE_X = 1.08;
 const AUTO_PASTE_BOX_COMFORT_SCALE_Y = 1.08;
+const SINGLE_WORD_AUTO_PASTE_FONT_SCALE = 1.18;
+const SINGLE_WORD_AUTO_PASTE_MAX_EXTRA = 8;
 const TYPESET_VISUAL_SIZE_FACTOR = 1.72;
 const TYPESET_FORCE_SCALE = 1.85;
 const TYPESET_RENDER_SCALE = 2.35;
@@ -373,6 +377,7 @@ const MAX_CLEAN_STRENGTH = 12;
 const DEFAULT_CLEAN_STRENGTH = 4;
 const MAX_CLEAN_MASK_EXPANSION = 18;
 const MAX_CLEAN_FEATHER = 16;
+const HENRY_AUTO_CLEAN_MASK_EXPANSION = 10;
 const MIN_PAGE_WORKERS = 1;
 const MAX_PAGE_WORKERS = 12;
 const TEXT_BOX_DRAG_THRESHOLD_PX = 3;
@@ -457,7 +462,20 @@ function getAutoTypesetText(unit: TextUnit, source: TypesetTranslationSource = "
 }
 
 function getOverlayText(unit: TextUnit) {
-  return getAutoTypesetText(unit) || unit.sourceText;
+  return getAutoTypesetText(unit);
+}
+
+function isSingleWordAutoPasteText(text: string) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized || normalized.includes(" ")) return false;
+  const withoutEdgePunctuation = normalized.replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, "");
+  return withoutEdgePunctuation.length > 0 && /[\p{L}\p{N}]/u.test(withoutEdgePunctuation);
+}
+
+function boostSingleWordAutoPasteFontSize(text: string, fontSize: number) {
+  if (!isSingleWordAutoPasteText(text)) return fontSize;
+  const scaled = Math.round(fontSize * SINGLE_WORD_AUTO_PASTE_FONT_SCALE);
+  return clampTextUnitFontSize(Math.min(fontSize + SINGLE_WORD_AUTO_PASTE_MAX_EXTRA, scaled));
 }
 
 function expandAutoTypesetRegion(unit: TextUnit, page: Page, source: TypesetTranslationSource = "default"): RegionBox {
@@ -3661,10 +3679,11 @@ function TranslationPage() {
     workspace.pages.find((page) => page.id === unit.pageId) ?? currentPage;
   const textBoxForUnit = (unit: TextUnit) =>
     textBoxDraft?.textUnitId === unit.id ? textBoxDraft.box : unit.typesetting.box ?? unit.region;
-  const displayFontSizeForUnit = (unit: TextUnit, box = textBoxForUnit(unit)) =>
-    unit.typesetting.isExplicit
-      ? clampTextUnitFontSize(unit.typesetting.fontSize)
-      : measureAutoTypesetFontSize(autoTypesetMeasureRef.current, getOverlayText(unit), box);
+  const displayFontSizeForUnit = (unit: TextUnit, box = textBoxForUnit(unit)) => {
+    const overlayText = getOverlayText(unit);
+    if (!overlayText || unit.typesetting.isExplicit) return clampTextUnitFontSize(unit.typesetting.fontSize);
+    return measureAutoTypesetFontSize(autoTypesetMeasureRef.current, overlayText, box);
+  };
   const selectedTextBox = selectedTextUnit ? textBoxForUnit(selectedTextUnit) : undefined;
   const currentPageTranslatedUnitCount = pageTextUnits.filter((unit) => getAutoTypesetText(unit)).length;
   const isHenryRunning = henryScope !== null;
@@ -3681,7 +3700,10 @@ function TranslationPage() {
     return {
       box,
       color: await resolveTypesetTextColor(page, box, marks),
-      fontSize: measureAutoTypesetFontSize(autoTypesetMeasureRef.current, text, box),
+      fontSize: boostSingleWordAutoPasteFontSize(
+        text,
+        measureAutoTypesetFontSize(autoTypesetMeasureRef.current, text, box),
+      ),
     };
   };
   const calculateAutoTypesetting = async (
@@ -4101,6 +4123,7 @@ function TranslationPage() {
   const henryOcrInput: OcrRunOptions = {
     ...ocrInput,
     autoCleanFeather: 2,
+    autoCleanMaskExpansion: Math.max(autoCleanMaskExpansion, HENRY_AUTO_CLEAN_MASK_EXPANSION),
     autoCleanPolicy: "force_all_regions",
     autoCleanProvider: "algorithm",
     autoCleanText: true,
@@ -4735,6 +4758,7 @@ function TranslationPage() {
         {units.map((unit) => {
           const label = getOverlayText(unit);
           const isSelected = unit.id === selectedTextUnit?.id;
+          if (!label && !isSelected) return null;
           return (
             <div className="edit-text-item" key={unit.id}>
               <button

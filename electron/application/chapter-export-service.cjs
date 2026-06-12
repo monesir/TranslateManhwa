@@ -14,6 +14,7 @@ const execFileAsync = promisify(execFile);
 const EXPORT_SCRIPT = path.join(__dirname, "..", "ocr", "scripts", "export-chapter-pages.py");
 const RUNTIME_PATHS = getRuntimePaths();
 const REPO_ROOT = RUNTIME_PATHS.repoRoot;
+const EXPORT_TEMP_ROOT = RUNTIME_PATHS.tempRoot;
 const DEFAULT_OCR_PYTHON = path.join(REPO_ROOT, ".venv-ocr", "Scripts", "python.exe");
 const TYPESET_FONT_PATH = path.join(REPO_ROOT, "src", "assets", "fonts", "JF-Flat-Regular.ttf");
 
@@ -143,8 +144,8 @@ class ChapterExportService {
     await fsp.mkdir(outputDirectory, { recursive: true });
 
     const manifest = this.buildManifest(chapterId, outputDirectory);
-    const manifestPath = path.join(RUNTIME_PATHS.tmpDir, `export-manifest-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
-    await fsp.mkdir(RUNTIME_PATHS.tmpDir, { recursive: true });
+    const manifestPath = path.join(EXPORT_TEMP_ROOT, `export-manifest-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
+    await fsp.mkdir(EXPORT_TEMP_ROOT, { recursive: true });
     await fsp.writeFile(manifestPath, JSON.stringify(manifest), "utf8");
 
     try {

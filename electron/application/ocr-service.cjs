@@ -220,6 +220,7 @@ class OcrService {
       cleanWorkerLimit(provider, pageWorkers),
       async (targets) => {
         const cleanErrors = [];
+        let cleanFallbacksApplied = 0;
         const cleanedRegions = new Set();
         let cleanPatchesCreated = 0;
         let cleanSkipped = 0;
@@ -239,7 +240,7 @@ class OcrService {
 
           try {
             const regions = autoCleanRegions(region, target.page, provider);
-            const cleanResult = await this.cleanService.cleanText(pageId, {
+            let cleanResult = await this.cleanService.cleanText(pageId, {
               ...settings,
               maskRegion: regions.maskRegion,
               mode: "auto_after_ocr",
@@ -250,12 +251,61 @@ class OcrService {
               sourceOcrRunId: run.id,
               sourceTextUnitId: target.id,
             });
+
+            if (cleanResult?.skipped && provider === "algorithm") {
+              cleanResult = await this.cleanService.cleanText(pageId, {
+                ...settings,
+                maskExpansion: Math.min(18, Number(settings?.maskExpansion ?? 4) + 2),
+                maskRegion: regions.maskRegion,
+                mode: "auto_after_ocr",
+                policy: "force_all_regions",
+                provider: "free_text_inpaint",
+                region: regions.region,
+                source,
+                sourceOcrRunId: run.id,
+                sourceTextUnitId: target.id,
+              });
+              cleanFallbacksApplied += 1;
+            }
+
             if (cleanResult?.skipped) {
               cleanSkipped += 1;
             } else {
               cleanPatchesCreated += 1;
             }
           } catch (error) {
+            if (provider === "algorithm") {
+              try {
+                const regions = autoCleanRegions(region, target.page, "free_text_inpaint");
+                const fallbackResult = await this.cleanService.cleanText(pageId, {
+                  ...settings,
+                  maskExpansion: Math.min(18, Number(settings?.maskExpansion ?? 4) + 2),
+                  maskRegion: regions.maskRegion,
+                  mode: "auto_after_ocr",
+                  policy: "force_all_regions",
+                  provider: "free_text_inpaint",
+                  region: regions.region,
+                  source,
+                  sourceOcrRunId: run.id,
+                  sourceTextUnitId: target.id,
+                });
+                cleanFallbacksApplied += 1;
+                if (fallbackResult?.skipped) {
+                  cleanSkipped += 1;
+                } else {
+                  cleanPatchesCreated += 1;
+                }
+                continue;
+              } catch (fallbackError) {
+                const originalMessage = error instanceof Error ? error.message : String(error);
+                const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+                cleanErrors.push(
+                  `Page ${target.page.pageIndex + 1}: ${originalMessage}; fallback failed: ${fallbackMessage}`,
+                );
+                continue;
+              }
+            }
+
             const message = error instanceof Error ? error.message : String(error);
             cleanErrors.push(`Page ${target.page.pageIndex + 1}: ${message}`);
           }
@@ -263,6 +313,7 @@ class OcrService {
 
         return {
           cleanErrors,
+          cleanFallbacksApplied,
           cleanPatchesCreated,
           cleanSkipped,
         };
@@ -271,6 +322,7 @@ class OcrService {
 
     return {
       cleanErrors: groupResults.flatMap((result) => result.cleanErrors).slice(0, 5),
+      cleanFallbacksApplied: groupResults.reduce((sum, result) => sum + result.cleanFallbacksApplied, 0),
       cleanPatchesCreated: groupResults.reduce((sum, result) => sum + result.cleanPatchesCreated, 0),
       cleanSkipped: groupResults.reduce((sum, result) => sum + result.cleanSkipped, 0),
     };

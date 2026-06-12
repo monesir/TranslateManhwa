@@ -409,6 +409,7 @@ export interface OcrRunResult {
   candidatesCreated: number;
   chapterId: string;
   cleanErrors?: string[];
+  cleanFallbacksApplied?: number;
   cleanPatchesCreated?: number;
   cleanSkipped?: number;
   languageDetected?: string | null;
