@@ -3,6 +3,7 @@ dist/
 dev-server.log
 electron-run.log
 .run/
+.backups/
 .cache/
 .models/
 .workspace/
