@@ -70,8 +70,10 @@ import {
   addGlossaryTerm,
   browseSourceTitles,
   cleanPageText,
+  createTextStylePreset,
   createProjectChapter,
   createProject,
+  deleteTextStylePreset,
   deleteCharacter,
   deleteGlossaryTerm,
   deleteOcrResults,
@@ -102,8 +104,10 @@ import {
   samplePageColor,
   searchSourceTitles,
   updateTextComposition,
+  applyTextStylePresetToSameKind,
   updateCharacter,
   updateChapterTextSize,
+  updateTextStylePreset,
   updateFinalTranslation,
   updateGlossaryTerm,
   updateTextUnitSource,
@@ -146,6 +150,7 @@ import type {
   TextComposition,
   TextCompositionUpdateInput,
   TextStylePreset,
+  TextStylePresetMutationInput,
   TextUnit,
   TextUnitTypesettingInput,
   TranslationLevel,
@@ -3236,6 +3241,8 @@ function TranslationPage() {
   const [autoTypesetStatus, setAutoTypesetStatus] = useState("");
   const [aiTranslationStatus, setAiTranslationStatus] = useState("");
   const [exportStatus, setExportStatus] = useState("");
+  const [presetEditorName, setPresetEditorName] = useState("");
+  const [presetEditorStatus, setPresetEditorStatus] = useState("");
   const [henryScope, setHenryScope] = useState<"page" | "chapter" | null>(null);
   const [henryMenuScope, setHenryMenuScope] = useState<"page" | "chapter" | null>(null);
   const [henryStatus, setHenryStatus] = useState("");
@@ -3363,6 +3370,87 @@ function TranslationPage() {
     },
     onError: () => {
       setTextCompositionBoxDraft(null);
+    },
+  });
+  const createTextStylePresetMutation = useMutation({
+    mutationFn: (input: TextStylePresetMutationInput) => createTextStylePreset(input),
+    onSuccess: (preset) => {
+      queryClient.setQueryData<ChapterTranslationWorkspace | undefined>(
+        ["translation-workspace", chapterId],
+        (current) => current
+          ? {
+            ...current,
+            textStylePresets: [...(current.textStylePresets ?? []), preset],
+          }
+          : current,
+      );
+      setPresetEditorStatus(`Created preset "${preset.name}".`);
+      setPresetEditorName("");
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+    onError: (error) => {
+      setPresetEditorStatus(error instanceof Error ? error.message : "Failed to create preset.");
+    },
+  });
+  const updateTextStylePresetMutation = useMutation({
+    mutationFn: ({ input, presetId }: { input: TextStylePresetMutationInput; presetId: string }) =>
+      updateTextStylePreset(presetId, input),
+    onSuccess: (preset) => {
+      queryClient.setQueryData<ChapterTranslationWorkspace | undefined>(
+        ["translation-workspace", chapterId],
+        (current) => current
+          ? {
+            ...current,
+            textStylePresets: (current.textStylePresets ?? []).map((item) => item.id === preset.id ? preset : item),
+          }
+          : current,
+      );
+      setPresetEditorStatus(`Updated preset "${preset.name}".`);
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+    onError: (error) => {
+      setPresetEditorStatus(error instanceof Error ? error.message : "Failed to update preset.");
+    },
+  });
+  const deleteTextStylePresetMutation = useMutation({
+    mutationFn: (presetId: string) => deleteTextStylePreset(presetId),
+    onSuccess: (result) => {
+      queryClient.setQueryData<ChapterTranslationWorkspace | undefined>(
+        ["translation-workspace", chapterId],
+        (current) => current
+          ? {
+            ...current,
+            textCompositions: current.textCompositions.map((composition) =>
+              composition.presetId === result.id ? { ...composition, presetId: null } : composition,
+            ),
+            textStylePresets: (current.textStylePresets ?? []).filter((preset) => preset.id !== result.id),
+          }
+          : current,
+      );
+      setPresetEditorStatus("Deleted project preset.");
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+    onError: (error) => {
+      setPresetEditorStatus(error instanceof Error ? error.message : "Failed to delete preset.");
+    },
+  });
+  const applyTextStylePresetToSameKindMutation = useMutation({
+    mutationFn: ({ chapterId: targetChapterId, input }: { chapterId: string; input: { kind: TextComposition["kind"]; presetId: string } }) =>
+      applyTextStylePresetToSameKind(targetChapterId, input),
+    onSuccess: (result) => {
+      setPresetEditorStatus(
+        `Applied to ${result.updated} ${result.kind} composition${result.updated === 1 ? "" : "s"}. ` +
+        `Skipped ${result.skippedManual} manual override${result.skippedManual === 1 ? "" : "s"}.`,
+      );
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+    onError: (error) => {
+      setPresetEditorStatus(error instanceof Error ? error.message : "Failed to apply preset.");
     },
   });
   const updateChapterTextSizeMutation = useMutation({
@@ -3697,10 +3785,12 @@ function TranslationPage() {
     composition.id === selectedTextCompositionId,
   );
   const textStylePresets = workspace.textStylePresets ?? [];
+  const projectTextStylePresets = textStylePresets.filter((preset) => preset.projectId === workspace.project.id);
   const selectedTextComposition = explicitSelectedTextComposition ?? textCompositionForSelectedUnit ?? workspace.textCompositions[0];
   const selectedTextCompositionPreset = selectedTextComposition
     ? textStylePresets.find((preset) => preset.id === selectedTextComposition.presetId)
     : undefined;
+  const selectedPresetIsProjectPreset = selectedTextCompositionPreset?.projectId === workspace.project.id;
   const selectedCompositionFontSize = clampTextUnitFontSize(selectedTextComposition?.style.fontSize ?? 18);
   const selectedCompositionColor = normalizeHexColor(selectedTextComposition?.style.color, TYPESET_DARK_TEXT_COLOR);
   const selectedCompositionStroke = selectedTextComposition?.effects?.stroke ?? selectedTextComposition?.style.stroke;
@@ -3867,9 +3957,59 @@ function TranslationPage() {
       [field]: value,
     });
   };
+  const buildPresetInputFromSelectedComposition = (name: string): TextStylePresetMutationInput | null => {
+    if (!selectedTextComposition) return null;
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setPresetEditorStatus("Preset name is required.");
+      return null;
+    }
+    return {
+      effects: selectedTextComposition.effects,
+      isDefault: false,
+      kind: selectedTextComposition.kind,
+      layout: selectedTextComposition.layout,
+      name: trimmedName,
+      projectId: workspace.project.id,
+      style: selectedTextComposition.style,
+    };
+  };
+  const createPresetFromSelectedComposition = () => {
+    const input = buildPresetInputFromSelectedComposition(presetEditorName);
+    if (!input || isPresetEditorPending) return;
+    createTextStylePresetMutation.mutate(input);
+  };
+  const updateCurrentProjectPresetFromSelectedComposition = () => {
+    if (!selectedTextCompositionPreset || !selectedPresetIsProjectPreset) return;
+    const input = buildPresetInputFromSelectedComposition(presetEditorName || selectedTextCompositionPreset.name);
+    if (!input || isPresetEditorPending) return;
+    updateTextStylePresetMutation.mutate({
+      input,
+      presetId: selectedTextCompositionPreset.id,
+    });
+  };
+  const deleteCurrentProjectPreset = () => {
+    if (!selectedTextCompositionPreset || !selectedPresetIsProjectPreset || isPresetEditorPending) return;
+    deleteTextStylePresetMutation.mutate(selectedTextCompositionPreset.id);
+  };
+  const applySelectedPresetToSameKind = () => {
+    if (!chapterId || !selectedTextComposition?.presetId || isPresetEditorPending) return;
+    applyTextStylePresetToSameKindMutation.mutate({
+      chapterId,
+      input: {
+        kind: selectedTextComposition.kind,
+        presetId: selectedTextComposition.presetId,
+      },
+    });
+  };
   const currentPageTranslatedUnitCount = pageTextUnits.filter((unit) => getAutoTypesetText(unit)).length;
   const isHenryRunning = henryScope !== null;
   const isAutoTypesetting = updateTextUnitTypesettingMutation.isPending || isHenryRunning;
+  const isPresetEditorPending =
+    createTextStylePresetMutation.isPending ||
+    updateTextStylePresetMutation.isPending ||
+    deleteTextStylePresetMutation.isPending ||
+    applyTextStylePresetToSameKindMutation.isPending;
   const calculateAutoPasteTypesetting = async (
     unit: TextUnit,
     page: Page,
@@ -5778,6 +5918,54 @@ function TranslationPage() {
                 ? `Preset: ${selectedTextCompositionPreset.name}`
                 : "Manual or generated composition"}
             </small>
+            <div className="preset-editor">
+              <h4>Preset editor</h4>
+              <input
+                className="preset-name-input"
+                disabled={!selectedTextComposition || isPresetEditorPending}
+                onChange={(event) => setPresetEditorName(event.target.value)}
+                placeholder={selectedTextCompositionPreset?.name ?? `${selectedTextComposition?.kind ?? "Text"} preset`}
+                type="text"
+                value={presetEditorName}
+              />
+              <div className="preset-editor-actions">
+                <button
+                  className="button secondary full-width"
+                  disabled={!selectedTextComposition || !presetEditorName.trim() || isPresetEditorPending}
+                  onClick={createPresetFromSelectedComposition}
+                  type="button"
+                >
+                  Save from selected
+                </button>
+                <button
+                  className="button secondary full-width"
+                  disabled={!selectedTextComposition || !selectedPresetIsProjectPreset || isPresetEditorPending}
+                  onClick={updateCurrentProjectPresetFromSelectedComposition}
+                  type="button"
+                >
+                  Update current preset
+                </button>
+                <button
+                  className="button secondary full-width"
+                  disabled={!selectedTextComposition?.presetId || isPresetEditorPending}
+                  onClick={applySelectedPresetToSameKind}
+                  title="Apply this preset to the same kind while skipping manual style overrides"
+                  type="button"
+                >
+                  Apply to same kind
+                </button>
+                <button
+                  className="button secondary full-width danger-command"
+                  disabled={!selectedPresetIsProjectPreset || isPresetEditorPending}
+                  onClick={deleteCurrentProjectPreset}
+                  type="button"
+                >
+                  Delete project preset
+                </button>
+              </div>
+              <small>{projectTextStylePresets.length} project preset{projectTextStylePresets.length === 1 ? "" : "s"}</small>
+              {presetEditorStatus ? <small className="brush-status">{presetEditorStatus}</small> : null}
+            </div>
           </div>
           <div className="tool-panel draw-panel">
             <h3>Brush</h3>

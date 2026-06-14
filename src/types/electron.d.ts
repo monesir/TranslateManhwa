@@ -40,6 +40,10 @@ import type {
   TextUnit,
   TextComposition,
   TextCompositionUpdateInput,
+  TextStylePreset,
+  TextStylePresetMutationInput,
+  ApplyTextStylePresetInput,
+  ApplyTextStylePresetResult,
   TextUnitTypesettingInput,
   TranslateTextUnitsInput,
   TranslateTextUnitsResult,
@@ -81,6 +85,16 @@ interface FlorisApi {
     compositionId: string,
     input: TextCompositionUpdateInput,
   ): Promise<TextComposition>;
+  createTextStylePreset(input: TextStylePresetMutationInput): Promise<TextStylePreset>;
+  updateTextStylePreset(
+    presetId: string,
+    input: TextStylePresetMutationInput,
+  ): Promise<TextStylePreset>;
+  deleteTextStylePreset(presetId: string): Promise<{ id: string; projectId: string | null }>;
+  applyTextStylePresetToSameKind(
+    chapterId: string,
+    input: ApplyTextStylePresetInput,
+  ): Promise<ApplyTextStylePresetResult>;
   updateChapterTextSize(
     chapterId: string,
     input: ChapterTextSizeInput,

@@ -45,6 +45,14 @@ function registerIpcHandlers(appApi) {
       appApi.updateTextUnitTypesetting(textUnitId, input),
     "data:updateTextComposition": (_event, compositionId, input) =>
       appApi.updateTextComposition(compositionId, input),
+    "data:createTextStylePreset": (_event, input) =>
+      appApi.createTextStylePreset(input),
+    "data:updateTextStylePreset": (_event, presetId, input) =>
+      appApi.updateTextStylePreset(presetId, input),
+    "data:deleteTextStylePreset": (_event, presetId) =>
+      appApi.deleteTextStylePreset(presetId),
+    "data:applyTextStylePresetToSameKind": (_event, chapterId, input) =>
+      appApi.applyTextStylePresetToSameKind(chapterId, input),
     "data:updateChapterTextSize": (_event, chapterId, input) =>
       appApi.updateChapterTextSize(chapterId, input),
     "data:addPageEditMark": (_event, input) =>

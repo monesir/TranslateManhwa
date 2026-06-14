@@ -90,6 +90,22 @@ function createAppApi(db, options = {}) {
       return translationWorkspaceRepository.updateTextComposition(compositionId, input);
     },
 
+    createTextStylePreset(input) {
+      return translationWorkspaceRepository.createTextStylePreset(input);
+    },
+
+    updateTextStylePreset(presetId, input) {
+      return translationWorkspaceRepository.updateTextStylePreset(presetId, input);
+    },
+
+    deleteTextStylePreset(presetId) {
+      return translationWorkspaceRepository.deleteTextStylePreset(presetId);
+    },
+
+    applyTextStylePresetToSameKind(chapterId, input) {
+      return translationWorkspaceRepository.applyTextStylePresetToSameKind(chapterId, input);
+    },
+
     updateChapterTextSize(chapterId, input) {
       return translationWorkspaceRepository.updateChapterTextSize(chapterId, input);
     },

@@ -2607,6 +2607,41 @@ h3 {
   accent-color: var(--accent);
 }
 
+.preset-editor {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.preset-editor h4 {
+  margin: 0;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.preset-name-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #10171b;
+  color: var(--text);
+}
+
+.preset-editor-actions {
+  display: grid;
+  gap: 7px;
+}
+
+.danger-command {
+  border-color: rgba(209, 100, 100, 0.45) !important;
+  color: #dfa1a1 !important;
+}
+
 .auto-typeset-panel {
   display: grid;
   gap: 8px;

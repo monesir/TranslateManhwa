@@ -38,6 +38,9 @@ import type {
   SourceTitleSummary,
   TextComposition,
   TextCompositionUpdateInput,
+  TextStylePresetMutationInput,
+  ApplyTextStylePresetInput,
+  ApplyTextStylePresetResult,
   TextStylePreset,
   TextUnit,
   TextUnitTypesettingInput,
@@ -72,7 +75,7 @@ let mutablePages: Page[] = [...pages];
 let mutablePageEditMarks: PageEditMark[] = [];
 let mutableTextCompositions: TextComposition[] = [];
 
-const mockTextStylePresets: TextStylePreset[] = [
+let mockTextStylePresets: TextStylePreset[] = [
   {
     createdAt: new Date(0).toISOString(),
     effects: undefined,
@@ -229,6 +232,10 @@ function compositionIdForTextUnit(textUnitId: string) {
   return `text_composition_${textUnitId}`;
 }
 
+function textStylePresetId() {
+  return `text_preset_mock_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
 function defaultCompositionLayout() {
   return mockTextStylePresets[0].layout;
 }
@@ -269,6 +276,31 @@ function upsertMockCompositionForTextUnit(unit: TextUnit, input: TextUnitTypeset
   mutableTextCompositions = existing
     ? mutableTextCompositions.map((item) => (item.id === id ? composition : item))
     : [...mutableTextCompositions, composition];
+}
+
+const bulkPresetBlockingFields = new Set([
+  "preset",
+  "kind",
+  "fontFamily",
+  "fontSize",
+  "fontWeight",
+  "color",
+  "opacity",
+  "stroke",
+  "shadow",
+  "background",
+  "layout",
+  "effects",
+]);
+
+function hasMockManualPresetOverride(composition: TextComposition) {
+  return composition.manualFields.some((field) => bulkPresetBlockingFields.has(field));
+}
+
+function normalizePresetName(value: string) {
+  const name = String(value ?? "").trim();
+  if (!name) throw new Error("Text style preset name is required");
+  return name.slice(0, 120);
 }
 
 export async function listProjects(): Promise<Project[]> {
@@ -1085,6 +1117,116 @@ export async function updateTextComposition(
   }
 
   return delay(updated, 80);
+}
+
+export async function createTextStylePreset(input: TextStylePresetMutationInput): Promise<TextStylePreset> {
+  if (window.florisApi) return window.florisApi.createTextStylePreset(input);
+
+  const timestamp = new Date().toISOString();
+  const preset: TextStylePreset = {
+    createdAt: timestamp,
+    effects: input.effects,
+    id: textStylePresetId(),
+    isDefault: Boolean(input.isDefault),
+    kind: input.kind,
+    layout: input.layout,
+    name: normalizePresetName(input.name),
+    projectId: input.projectId ?? null,
+    style: input.style,
+    updatedAt: timestamp,
+  };
+  mockTextStylePresets = [...mockTextStylePresets, preset];
+  return delay(preset, 80);
+}
+
+export async function updateTextStylePreset(
+  presetId: string,
+  input: TextStylePresetMutationInput,
+): Promise<TextStylePreset> {
+  if (window.florisApi) return window.florisApi.updateTextStylePreset(presetId, input);
+
+  const existing = mockTextStylePresets.find((preset) => preset.id === presetId);
+  if (!existing) throw new Error("Text style preset not found");
+  if (!existing.projectId) throw new Error("Global text style presets cannot be edited");
+  const updated: TextStylePreset = {
+    ...existing,
+    effects: input.effects,
+    isDefault: Boolean(input.isDefault),
+    kind: input.kind,
+    layout: input.layout,
+    name: normalizePresetName(input.name),
+    style: input.style,
+    updatedAt: new Date().toISOString(),
+  };
+  mockTextStylePresets = mockTextStylePresets.map((preset) => preset.id === presetId ? updated : preset);
+  return delay(updated, 80);
+}
+
+export async function deleteTextStylePreset(presetId: string): Promise<{ id: string; projectId: string | null }> {
+  if (window.florisApi) return window.florisApi.deleteTextStylePreset(presetId);
+
+  const existing = mockTextStylePresets.find((preset) => preset.id === presetId);
+  if (!existing) throw new Error("Text style preset not found");
+  if (!existing.projectId) throw new Error("Global text style presets cannot be deleted");
+  mockTextStylePresets = mockTextStylePresets.filter((preset) => preset.id !== presetId);
+  mutableTextCompositions = mutableTextCompositions.map((composition) =>
+    composition.presetId === presetId ? { ...composition, presetId: null } : composition,
+  );
+  return delay({ id: presetId, projectId: existing.projectId }, 80);
+}
+
+export async function applyTextStylePresetToSameKind(
+  chapterId: string,
+  input: ApplyTextStylePresetInput,
+): Promise<ApplyTextStylePresetResult> {
+  if (window.florisApi) return window.florisApi.applyTextStylePresetToSameKind(chapterId, input);
+
+  const preset = mockTextStylePresets.find((item) => item.id === input.presetId);
+  if (!preset) throw new Error("Text style preset not found");
+  const kind = input.kind ?? preset.kind;
+  let updated = 0;
+  let skippedManual = 0;
+  const timestamp = new Date().toISOString();
+  const updatedTextUnitIds = new Set<string>();
+
+  mutableTextCompositions = mutableTextCompositions.map((composition) => {
+    if (composition.chapterId !== chapterId || composition.kind !== kind) return composition;
+    if (hasMockManualPresetOverride(composition)) {
+      skippedManual += 1;
+      return composition;
+    }
+    updated += 1;
+    if (composition.textUnitId) updatedTextUnitIds.add(composition.textUnitId);
+    return {
+      ...composition,
+      effects: preset.effects,
+      layout: preset.layout,
+      presetId: preset.id,
+      style: preset.style,
+      updatedAt: timestamp,
+    };
+  });
+
+  mutableTextUnits = mutableTextUnits.map((unit) =>
+    updatedTextUnitIds.has(unit.id)
+      ? {
+        ...unit,
+        typesetting: {
+          ...unit.typesetting,
+          color: preset.style.color,
+          fontSize: preset.style.fontSize,
+        },
+      }
+      : unit,
+  );
+
+  return delay({
+    chapterId,
+    kind,
+    presetId: preset.id,
+    skippedManual,
+    updated,
+  }, 80);
 }
 
 export async function updateChapterTextSize(

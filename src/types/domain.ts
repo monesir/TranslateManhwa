@@ -6,6 +6,7 @@ import type {
   TextCompositionOrigin,
   TextCompositionSource,
   TextStylePreset,
+  TextStylePresetInput,
 } from "../text-composition/types";
 
 export type {
@@ -16,6 +17,7 @@ export type {
   TextCompositionOrigin,
   TextCompositionSource,
   TextStylePreset,
+  TextStylePresetInput,
 } from "../text-composition/types";
 
 export type ProjectStatus = "Active" | "Paused" | "Completed" | "Archived";
@@ -472,6 +474,21 @@ export interface TextCompositionUpdateInput {
   presetId?: string | null;
   resetToPreset?: boolean;
   stroke?: Partial<CompositionStroke>;
+}
+
+export type TextStylePresetMutationInput = TextStylePresetInput;
+
+export interface ApplyTextStylePresetInput {
+  kind?: TextCompositionKind;
+  presetId: string;
+}
+
+export interface ApplyTextStylePresetResult {
+  chapterId: string;
+  kind: TextCompositionKind;
+  presetId: string;
+  skippedManual: number;
+  updated: number;
 }
 
 export interface ChapterTextSizeInput {

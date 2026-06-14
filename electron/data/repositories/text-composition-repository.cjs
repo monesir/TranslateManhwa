@@ -2,6 +2,10 @@ function textCompositionId() {
   return `text_composition_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
+function textStylePresetId() {
+  return `text_preset_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
 function parseJson(value, fallback) {
   if (value == null || value === "") return fallback;
   try {
@@ -87,6 +91,8 @@ const PRESET_RESET_FIELDS = [
   "effects",
 ];
 
+const BULK_PRESET_BLOCKING_FIELDS = new Set(PRESET_RESET_FIELDS);
+
 function normalizeManualFields(fields) {
   return Array.from(new Set((Array.isArray(fields) ? fields : [])
     .map((field) => String(field ?? "").trim())
@@ -110,6 +116,36 @@ function normalizeStroke(input, fallback = {}) {
     opacity: clamp(input?.opacity ?? fallback?.opacity ?? 1, 0, 1),
     width: roundCoordinate(Math.max(0, Number(input?.width ?? fallback?.width ?? 2))),
   };
+}
+
+function normalizePresetName(value) {
+  const name = String(value ?? "").trim();
+  if (!name) throw new Error("Text style preset name is required");
+  return name.slice(0, 120);
+}
+
+function normalizePresetKind(value) {
+  const kind = String(value ?? "dialogue").trim();
+  if (["dialogue", "thought", "narration", "shout", "whisper", "aside", "sfx", "title", "sign", "unknown"].includes(kind)) {
+    return kind;
+  }
+  return "dialogue";
+}
+
+function normalizePresetPayload(input = {}) {
+  return {
+    effects: input.effects && typeof input.effects === "object" ? input.effects : undefined,
+    isDefault: input.isDefault ? 1 : 0,
+    kind: normalizePresetKind(input.kind),
+    layout: input.layout && typeof input.layout === "object" ? input.layout : {},
+    name: normalizePresetName(input.name),
+    projectId: input.projectId ? String(input.projectId).trim() : null,
+    style: input.style && typeof input.style === "object" ? input.style : {},
+  };
+}
+
+function hasBulkPresetManualOverride(fields) {
+  return normalizeManualFields(fields).some((field) => BULK_PRESET_BLOCKING_FIELDS.has(field));
 }
 
 function offsetBoxJson(value, offsetX, offsetY) {
@@ -210,6 +246,82 @@ class TextCompositionRepository {
     if (!id) return null;
     const row = this.db.prepare("SELECT * FROM text_style_presets WHERE id = ?").get(id);
     return row ? mapPresetRow(row) : null;
+  }
+
+  createTextStylePreset(input) {
+    const timestamp = new Date().toISOString();
+    const preset = normalizePresetPayload(input);
+    const id = String(input?.id ?? "").trim() || textStylePresetId();
+
+    this.db.prepare(`
+      INSERT INTO text_style_presets (
+        id, project_id, name, kind, style_json, layout_json, effect_json, is_default, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      preset.projectId,
+      preset.name,
+      preset.kind,
+      JSON.stringify(preset.style),
+      JSON.stringify(preset.layout),
+      preset.effects ? JSON.stringify(preset.effects) : null,
+      preset.isDefault,
+      timestamp,
+      timestamp,
+    );
+
+    return this.getTextStylePreset(id);
+  }
+
+  updateTextStylePreset(presetId, input) {
+    const id = String(presetId ?? "").trim();
+    if (!id) throw new Error("Text style preset id is required");
+    const existing = this.db.prepare("SELECT * FROM text_style_presets WHERE id = ?").get(id);
+    if (!existing) throw new Error("Text style preset not found");
+    if (!existing.project_id) throw new Error("Global text style presets cannot be edited");
+
+    const timestamp = new Date().toISOString();
+    const preset = normalizePresetPayload({
+      projectId: existing.project_id,
+      ...input,
+    });
+
+    this.db.prepare(`
+      UPDATE text_style_presets
+      SET
+        name = ?,
+        kind = ?,
+        style_json = ?,
+        layout_json = ?,
+        effect_json = ?,
+        is_default = ?,
+        updated_at = ?
+      WHERE id = ?
+    `).run(
+      preset.name,
+      preset.kind,
+      JSON.stringify(preset.style),
+      JSON.stringify(preset.layout),
+      preset.effects ? JSON.stringify(preset.effects) : null,
+      preset.isDefault,
+      timestamp,
+      id,
+    );
+
+    return this.getTextStylePreset(id);
+  }
+
+  deleteTextStylePreset(presetId) {
+    const id = String(presetId ?? "").trim();
+    if (!id) throw new Error("Text style preset id is required");
+    const existing = this.db.prepare("SELECT * FROM text_style_presets WHERE id = ?").get(id);
+    if (!existing) throw new Error("Text style preset not found");
+    if (!existing.project_id) throw new Error("Global text style presets cannot be deleted");
+    this.db.prepare("DELETE FROM text_style_presets WHERE id = ?").run(id);
+    return {
+      id,
+      projectId: existing.project_id,
+    };
   }
 
   getTextComposition(compositionId) {
@@ -388,6 +500,62 @@ class TextCompositionRepository {
     );
 
     return this.getTextComposition(id);
+  }
+
+  applyTextStylePresetToSameKind(chapterId, input = {}) {
+    const targetChapterId = String(chapterId ?? "").trim();
+    if (!targetChapterId) throw new Error("Chapter is required for preset application");
+
+    const preset = this.getTextStylePreset(input.presetId);
+    if (!preset) throw new Error("Text style preset not found");
+    const kind = normalizePresetKind(input.kind ?? preset.kind);
+    const timestamp = new Date().toISOString();
+    const rows = this.db.prepare(`
+      SELECT *
+      FROM text_compositions
+      WHERE chapter_id = ? AND kind = ?
+      ORDER BY render_order ASC, created_at ASC, id ASC
+    `).all(targetChapterId, kind);
+
+    let updated = 0;
+    let skippedManual = 0;
+
+    const updateStatement = this.db.prepare(`
+      UPDATE text_compositions
+      SET
+        preset_id = ?,
+        style_json = ?,
+        layout_json = ?,
+        effect_json = ?,
+        updated_at = ?
+      WHERE id = ?
+    `);
+
+    for (const row of rows) {
+      const manualFields = parseJson(row.manual_fields_json, []);
+      if (hasBulkPresetManualOverride(manualFields)) {
+        skippedManual += 1;
+        continue;
+      }
+
+      updateStatement.run(
+        preset.id,
+        JSON.stringify(preset.style ?? {}),
+        JSON.stringify(preset.layout ?? {}),
+        preset.effects ? JSON.stringify(preset.effects) : null,
+        timestamp,
+        row.id,
+      );
+      updated += 1;
+    }
+
+    return {
+      chapterId: targetChapterId,
+      kind,
+      presetId: preset.id,
+      skippedManual,
+      updated,
+    };
   }
 
   deleteTextComposition(compositionId) {

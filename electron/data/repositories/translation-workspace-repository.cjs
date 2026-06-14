@@ -897,6 +897,81 @@ class TranslationWorkspaceRepository {
     return this.displayCompositionForMergeState(composition, state);
   }
 
+  touchProject(projectId, timestamp) {
+    if (!projectId) return;
+    this.db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(timestamp, projectId);
+  }
+
+  touchChapterAndProject(chapterId, timestamp) {
+    if (!chapterId) return;
+    this.db.prepare("UPDATE chapters SET updated_at = ? WHERE id = ?").run(timestamp, chapterId);
+    this.db.prepare(`
+      UPDATE projects
+      SET updated_at = ?
+      WHERE id = (SELECT project_id FROM chapters WHERE id = ?)
+    `).run(timestamp, chapterId);
+  }
+
+  createTextStylePreset(input = {}) {
+    const timestamp = new Date().toISOString();
+    let preset;
+    this.db.exec("BEGIN");
+    try {
+      preset = this.textCompositionRepository.createTextStylePreset(input);
+      this.touchProject(preset.projectId, timestamp);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return preset;
+  }
+
+  updateTextStylePreset(presetId, input = {}) {
+    const timestamp = new Date().toISOString();
+    let preset;
+    this.db.exec("BEGIN");
+    try {
+      preset = this.textCompositionRepository.updateTextStylePreset(presetId, input);
+      this.touchProject(preset.projectId, timestamp);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return preset;
+  }
+
+  deleteTextStylePreset(presetId) {
+    const timestamp = new Date().toISOString();
+    let result;
+    this.db.exec("BEGIN");
+    try {
+      result = this.textCompositionRepository.deleteTextStylePreset(presetId);
+      this.touchProject(result.projectId, timestamp);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return result;
+  }
+
+  applyTextStylePresetToSameKind(chapterId, input = {}) {
+    const timestamp = new Date().toISOString();
+    let result;
+    this.db.exec("BEGIN");
+    try {
+      result = this.textCompositionRepository.applyTextStylePresetToSameKind(chapterId, input);
+      if (result.updated > 0) this.touchChapterAndProject(chapterId, timestamp);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return result;
+  }
+
   addPageEditMark(input) {
     const page = this.db.prepare(`
       SELECT p.id, p.chapter_id, p.width, p.height
