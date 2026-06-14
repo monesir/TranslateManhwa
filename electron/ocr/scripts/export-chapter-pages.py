@@ -3,7 +3,7 @@ import math
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 try:
     import arabic_reshaper
@@ -30,24 +30,47 @@ def shape_text(text):
     return text
 
 
-def text_bbox(draw, text, font):
+def text_bbox(draw, text, font, stroke_width=1):
     if not text:
         return 0, 0
-    bbox = draw.textbbox((0, 0), shape_text(text), font=font, stroke_width=1)
+    bbox = draw.textbbox((0, 0), shape_text(text), font=font, stroke_width=max(0, int(round(stroke_width or 0))))
     return max(0, bbox[2] - bbox[0]), max(0, bbox[3] - bbox[1])
 
 
-def wrap_text(draw, text, font, max_width):
+def wrap_characters(draw, text, font, max_width, stroke_width=1):
+    lines = []
+    current = ""
+    for char in str(text or ""):
+        if char in "\r\n":
+            if current:
+                lines.append(current)
+            current = ""
+            continue
+        candidate = f"{current}{char}"
+        width, _ = text_bbox(draw, candidate, font, stroke_width)
+        if width <= max_width or not current:
+            current = candidate
+        else:
+            lines.append(current)
+            current = char
+    if current:
+        lines.append(current)
+    return lines
+
+
+def wrap_text(draw, text, font, max_width, split_long_words=True, wrap_mode="word", stroke_width=1):
     paragraphs = [paragraph.strip() for paragraph in str(text or "").splitlines() if paragraph.strip()]
     if not paragraphs:
         return []
+    if wrap_mode == "character":
+        return wrap_characters(draw, "\n".join(paragraphs), font, max_width, stroke_width)
 
     def split_long_word(word):
         chunks = []
         current = ""
         for char in word:
             candidate = f"{current}{char}"
-            width, _ = text_bbox(draw, candidate, font)
+            width, _ = text_bbox(draw, candidate, font, stroke_width)
             if width <= max_width or not current:
                 current = candidate
             else:
@@ -63,17 +86,17 @@ def wrap_text(draw, text, font, max_width):
         current = ""
         for word in words:
             candidate = word if not current else f"{current} {word}"
-            width, _ = text_bbox(draw, candidate, font)
+            width, _ = text_bbox(draw, candidate, font, stroke_width)
             if width <= max_width or not current:
-                if not current and width > max_width:
+                if split_long_words and not current and width > max_width:
                     lines.extend(split_long_word(word))
                     current = ""
                 else:
                     current = candidate
             else:
                 lines.append(current)
-                word_width, _ = text_bbox(draw, word, font)
-                if word_width > max_width:
+                word_width, _ = text_bbox(draw, word, font, stroke_width)
+                if split_long_words and word_width > max_width:
                     lines.extend(split_long_word(word))
                     current = ""
                 else:
@@ -102,6 +125,84 @@ def fit_lines(draw, text, font_path, requested_size, width, height):
     return font, wrap_text(draw, text, font, max_width), int(math.ceil(8 * LINE_HEIGHT))
 
 
+def clamp(value, min_value, max_value):
+    try:
+        number = float(value)
+    except Exception:
+        return min_value
+    return max(min_value, min(max_value, number))
+
+
+def composition_text(composition):
+    content = composition.get("content") or {}
+    spans = content.get("spans") if isinstance(content, dict) else None
+    if isinstance(spans, list) and spans:
+        text = "".join(str(span.get("text") or "") for span in spans if isinstance(span, dict))
+    else:
+        text = str(composition.get("plainText") or "")
+    return text.strip()
+
+
+def composition_effect(composition, name):
+    effects = composition.get("effects") or {}
+    style = composition.get("style") or {}
+    if isinstance(effects, dict) and effects.get(name):
+        return effects.get(name)
+    if isinstance(style, dict) and style.get(name):
+        return style.get(name)
+    return None
+
+
+def composition_font_size(style):
+    return max(8, int(round(float(style.get("fontSize") or 18) * TEXT_RENDER_SCALE)))
+
+
+def composition_stroke_width(stroke):
+    if not isinstance(stroke, dict) or not stroke.get("enabled"):
+        return 0
+    return max(0, int(round(float(stroke.get("width") or 0))))
+
+
+def fit_composition_lines(draw, text, font_path, style, layout, width, height, stroke_width):
+    requested_size = composition_font_size(style)
+    padding_x = max(0, float(layout.get("paddingX", PADDING_X)))
+    padding_y = max(0, float(layout.get("paddingY", PADDING_Y)))
+    line_height_factor = max(0.8, float(layout.get("lineHeight", LINE_HEIGHT) or LINE_HEIGHT))
+    wrap_mode = str(layout.get("wrapMode") or "word")
+    split_long_words = bool(layout.get("allowWordBreak")) or wrap_mode == "character"
+    fit_mode = str(layout.get("fitMode") or "shrink_to_fit")
+    max_width = max(1, width - padding_x * 2)
+    max_height = max(1, height - padding_y * 2)
+
+    def build_lines(size):
+        font = ImageFont.truetype(font_path, size=size)
+        lines = wrap_text(
+            draw,
+            text,
+            font,
+            max_width,
+            split_long_words=split_long_words,
+            wrap_mode=wrap_mode,
+            stroke_width=stroke_width,
+        )
+        line_height = max(1, int(math.ceil(size * line_height_factor)))
+        return font, lines, line_height
+
+    if fit_mode != "shrink_to_fit":
+        return build_lines(requested_size)
+
+    size = requested_size
+    while size >= 8:
+        font, lines, line_height = build_lines(size)
+        total_height = line_height * len(lines)
+        widest = max((text_bbox(draw, line, font, stroke_width)[0] for line in lines), default=0)
+        if lines and widest <= max_width + 1 and total_height <= max_height + 1:
+            return font, lines, line_height
+        size -= 1
+
+    return build_lines(8)
+
+
 def rgba(color, opacity=1):
     value = str(color or "#000000").strip()
     if value.startswith("#"):
@@ -114,12 +215,35 @@ def rgba(color, opacity=1):
         blue = int(value[4:6], 16)
     except Exception:
         red, green, blue = 0, 0, 0
-    alpha = max(0, min(255, int(round(float(opacity or 1) * 255))))
+    opacity_value = 1 if opacity is None else opacity
+    alpha = max(0, min(255, int(round(float(opacity_value) * 255))))
     return red, green, blue, alpha
 
 
 def text_rgba(color):
     return rgba(color or DEFAULT_TEXT_COLOR, 1)
+
+
+def alpha_composite_at(base, overlay, x, y):
+    x = int(round(x))
+    y = int(round(y))
+    if overlay.width <= 0 or overlay.height <= 0:
+        return
+    left = max(0, x)
+    top = max(0, y)
+    right = min(base.width, x + overlay.width)
+    bottom = min(base.height, y + overlay.height)
+    if right <= left or bottom <= top:
+        return
+    crop = overlay.crop((left - x, top - y, right - x, bottom - y))
+    base.alpha_composite(crop, (left, top))
+
+
+def draw_rounded_rectangle(draw, bounds, radius, fill):
+    if radius > 0:
+        draw.rounded_rectangle(bounds, radius=radius, fill=fill)
+    else:
+        draw.rectangle(bounds, fill=fill)
 
 
 def paste_patch(base, mark):
@@ -195,6 +319,133 @@ def draw_text(base, text_unit, font_path):
         cursor_y += line_height
 
 
+def draw_composition(base, composition, font_path):
+    text = composition_text(composition)
+    box = composition.get("box") or {}
+    style = composition.get("style") or {}
+    layout = composition.get("layout") or {}
+    if not text:
+        return
+
+    x = float(box.get("x", 0))
+    y = float(box.get("y", 0))
+    width = int(round(float(box.get("width", 0))))
+    height = int(round(float(box.get("height", 0))))
+    if width <= 0 or height <= 0:
+        return
+
+    stroke = composition_effect(composition, "stroke")
+    shadow = composition_effect(composition, "shadow")
+    background = composition_effect(composition, "background")
+    stroke_width = composition_stroke_width(stroke)
+    shadow_dx = float(shadow.get("x", 0)) if isinstance(shadow, dict) and shadow.get("enabled") else 0
+    shadow_dy = float(shadow.get("y", 0)) if isinstance(shadow, dict) and shadow.get("enabled") else 0
+    shadow_blur = max(0, float(shadow.get("blur", 0))) if isinstance(shadow, dict) and shadow.get("enabled") else 0
+    margin = int(math.ceil(max(10, stroke_width + shadow_blur + abs(shadow_dx) + abs(shadow_dy) + 4)))
+
+    layer = Image.new("RGBA", (width + margin * 2, height + margin * 2), (0, 0, 0, 0))
+    layer_draw = ImageDraw.Draw(layer)
+    local_x = margin
+    local_y = margin
+
+    if isinstance(background, dict) and background.get("enabled"):
+        draw_rounded_rectangle(
+            layer_draw,
+            (local_x, local_y, local_x + width, local_y + height),
+            max(0, float(background.get("radius") or 0)),
+            rgba(background.get("color"), background.get("opacity", 1)),
+        )
+
+    font, lines, line_height = fit_composition_lines(
+        layer_draw,
+        text,
+        font_path,
+        style,
+        layout,
+        width,
+        height,
+        stroke_width,
+    )
+    if not lines:
+        return
+
+    padding_x = max(0, float(layout.get("paddingX", PADDING_X)))
+    padding_y = max(0, float(layout.get("paddingY", PADDING_Y)))
+    content_left = local_x + padding_x
+    content_top = local_y + padding_y
+    content_width = max(1, width - padding_x * 2)
+    content_height = max(1, height - padding_y * 2)
+    total_height = line_height * len(lines)
+    vertical_align = str(layout.get("verticalAlign") or "middle")
+    if vertical_align == "top":
+        cursor_y = content_top
+    elif vertical_align == "bottom":
+        cursor_y = content_top + max(0, content_height - total_height)
+    else:
+        cursor_y = content_top + max(0, (content_height - total_height) / 2)
+
+    align = str(layout.get("align") or "center")
+    text_color = rgba(style.get("color") or DEFAULT_TEXT_COLOR, clamp(style.get("opacity", 1), 0, 1))
+    stroke_fill = rgba(
+        stroke.get("color") if isinstance(stroke, dict) else style.get("color"),
+        stroke.get("opacity", 1) if isinstance(stroke, dict) else 1,
+    ) if stroke_width > 0 else text_color
+
+    shadow_layer = None
+    shadow_draw = None
+    if isinstance(shadow, dict) and shadow.get("enabled"):
+        shadow_layer = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+        shadow_draw = ImageDraw.Draw(shadow_layer)
+
+    line_positions = []
+    for line in lines:
+        line_width, _ = text_bbox(layer_draw, line, font, stroke_width)
+        if align == "left":
+            line_x = content_left
+        elif align == "right":
+            line_x = content_left + max(0, content_width - line_width)
+        else:
+            line_x = content_left + max(0, (content_width - line_width) / 2)
+        line_positions.append((line, line_x, cursor_y))
+        cursor_y += line_height
+
+    if shadow_draw:
+        shadow_color = rgba(shadow.get("color"), shadow.get("opacity", 1))
+        for line, line_x, line_y in line_positions:
+            shadow_draw.text(
+                (line_x + shadow_dx, line_y + shadow_dy),
+                shape_text(line),
+                fill=shadow_color,
+                font=font,
+                stroke_width=stroke_width,
+                stroke_fill=shadow_color,
+            )
+        if shadow_blur > 0:
+            shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=shadow_blur))
+        layer.alpha_composite(shadow_layer)
+
+    for line, line_x, line_y in line_positions:
+        layer_draw.text(
+            (line_x, line_y),
+            shape_text(line),
+            fill=text_color,
+            font=font,
+            stroke_width=stroke_width,
+            stroke_fill=stroke_fill,
+        )
+
+    rotation = float(layout.get("rotation", 0) or 0)
+    if rotation:
+        rendered = layer.rotate(-rotation, expand=True, resample=Image.Resampling.BICUBIC)
+        center_x = x + width / 2
+        center_y = y + height / 2
+        paste_x = center_x - rendered.width / 2
+        paste_y = center_y - rendered.height / 2
+        alpha_composite_at(base, rendered, paste_x, paste_y)
+    else:
+        alpha_composite_at(base, layer, x - margin, y - margin)
+
+
 def export_page(page, font_path, output_dir):
     base = Image.open(page["imagePath"]).convert("RGBA")
     for mark in page.get("marks", []):
@@ -204,6 +455,8 @@ def export_page(page, font_path, output_dir):
             draw_brush(base, mark)
     for text_unit in page.get("textUnits", []):
         draw_text(base, text_unit, font_path)
+    for composition in sorted(page.get("textCompositions", []), key=lambda item: item.get("renderOrder", 0)):
+        draw_composition(base, composition, font_path)
 
     output_name = f"{int(page.get('index', 0)):04d}.png"
     output_path = output_dir / output_name

@@ -51,6 +51,29 @@ function bestTextForExport(unit) {
     .find((text) => text.length > 0) ?? "";
 }
 
+function compositionTextForExport(composition) {
+  const spans = composition?.content?.spans;
+  if (Array.isArray(spans) && spans.length > 0) {
+    return spans.map((span) => String(span?.text ?? "")).join("").trim();
+  }
+  return String(composition?.plainText ?? "").trim();
+}
+
+function compositionForExport(composition) {
+  return {
+    box: composition.box,
+    content: composition.content ?? null,
+    effects: composition.effects ?? null,
+    id: composition.id,
+    kind: composition.kind,
+    layout: composition.layout,
+    plainText: compositionTextForExport(composition),
+    renderOrder: composition.renderOrder ?? 0,
+    style: composition.style,
+    textUnitId: composition.textUnitId ?? null,
+  };
+}
+
 function markForExport(workspacePath, mark) {
   if (mark.kind === "clean_patch") {
     return {
@@ -98,7 +121,22 @@ class ChapterExportService {
     }
 
     const textUnitsByPage = new Map();
+    const textCompositionsByPage = new Map();
+    const textUnitIdsWithCompositions = new Set();
+    for (const composition of workspace.textCompositions ?? []) {
+      const text = compositionTextForExport(composition);
+      if (!text) continue;
+      if (composition.textUnitId) textUnitIdsWithCompositions.add(composition.textUnitId);
+      const group = textCompositionsByPage.get(composition.pageId) ?? [];
+      group.push(compositionForExport({
+        ...composition,
+        plainText: text,
+      }));
+      textCompositionsByPage.set(composition.pageId, group);
+    }
+
     for (const unit of workspace.textUnits ?? []) {
+      if (textUnitIdsWithCompositions.has(unit.id)) continue;
       const text = bestTextForExport(unit);
       if (!text) continue;
       const group = textUnitsByPage.get(unit.pageId) ?? [];
@@ -107,6 +145,7 @@ class ChapterExportService {
         color: unit.typesetting?.color ?? "#17110B",
         fontSize: unit.typesetting?.fontSize ?? 18,
         text,
+        textUnitId: unit.id,
       });
       textUnitsByPage.set(unit.pageId, group);
     }
@@ -120,6 +159,7 @@ class ChapterExportService {
         imagePath: localPathFromCacheUrl(this.workspacePath, page.imageUrl),
         index: page.index,
         marks: (marksByPage.get(page.id) ?? []).map((mark) => markForExport(this.workspacePath, mark)),
+        textCompositions: textCompositionsByPage.get(page.id) ?? [],
         textUnits: textUnitsByPage.get(page.id) ?? [],
         width: page.width,
       })),
