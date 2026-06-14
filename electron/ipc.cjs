@@ -43,6 +43,8 @@ function registerIpcHandlers(appApi) {
       appApi.deleteTextUnit(textUnitId),
     "data:updateTextUnitTypesetting": (_event, textUnitId, input) =>
       appApi.updateTextUnitTypesetting(textUnitId, input),
+    "data:updateTextComposition": (_event, compositionId, input) =>
+      appApi.updateTextComposition(compositionId, input),
     "data:updateChapterTextSize": (_event, chapterId, input) =>
       appApi.updateChapterTextSize(chapterId, input),
     "data:addPageEditMark": (_event, input) =>

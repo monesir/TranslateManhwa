@@ -36,6 +36,9 @@ import type {
   SourceProjectImportResult,
   SourceTitleDetailsResult,
   SourceTitleSummary,
+  TextComposition,
+  TextCompositionUpdateInput,
+  TextStylePreset,
   TextUnit,
   TextUnitTypesettingInput,
   TranslateTextUnitsInput,
@@ -67,6 +70,70 @@ let mutableProjectOverviews: ProjectOverview[] = [...projectOverviews];
 let mutableChapters: Chapter[] = [...chapters];
 let mutablePages: Page[] = [...pages];
 let mutablePageEditMarks: PageEditMark[] = [];
+let mutableTextCompositions: TextComposition[] = [];
+
+const mockTextStylePresets: TextStylePreset[] = [
+  {
+    createdAt: new Date(0).toISOString(),
+    effects: undefined,
+    id: "text_preset_global_normal_dialogue",
+    isDefault: true,
+    kind: "dialogue",
+    layout: {
+      allowWordBreak: false,
+      align: "center",
+      direction: "auto",
+      fitMode: "shrink_to_fit",
+      lineHeight: 1.28,
+      maxLines: null,
+      paddingX: 5,
+      paddingY: 4,
+      rotation: 0,
+      verticalAlign: "middle",
+      wrapMode: "word",
+    },
+    name: "Normal dialogue",
+    projectId: null,
+    style: {
+      color: "#17110B",
+      fontFamily: "JF Flat",
+      fontSize: 18,
+      fontWeight: 800,
+      opacity: 1,
+    },
+    updatedAt: new Date(0).toISOString(),
+  },
+  {
+    createdAt: new Date(0).toISOString(),
+    effects: undefined,
+    id: "text_preset_global_black_bubble",
+    isDefault: true,
+    kind: "dialogue",
+    layout: {
+      allowWordBreak: false,
+      align: "center",
+      direction: "auto",
+      fitMode: "shrink_to_fit",
+      lineHeight: 1.28,
+      maxLines: null,
+      paddingX: 5,
+      paddingY: 4,
+      rotation: 0,
+      verticalAlign: "middle",
+      wrapMode: "word",
+    },
+    name: "Black bubble",
+    projectId: null,
+    style: {
+      color: "#F7F2E8",
+      fontFamily: "JF Flat",
+      fontSize: 18,
+      fontWeight: 800,
+      opacity: 1,
+    },
+    updatedAt: new Date(0).toISOString(),
+  },
+];
 
 function slugify(value: string) {
   return value
@@ -146,6 +213,62 @@ function normalizeHexColor(value: string) {
     return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
   }
   return "#FFFFFF";
+}
+
+function normalizeTextColor(value: string | undefined, fallback = "#17110B") {
+  const color = String(value ?? "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color.toUpperCase();
+  if (/^#[0-9a-f]{3}$/i.test(color)) {
+    const [, r, g, b] = color;
+    return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
+  return fallback;
+}
+
+function compositionIdForTextUnit(textUnitId: string) {
+  return `text_composition_${textUnitId}`;
+}
+
+function defaultCompositionLayout() {
+  return mockTextStylePresets[0].layout;
+}
+
+function upsertMockCompositionForTextUnit(unit: TextUnit, input: TextUnitTypesettingInput, box: RegionBox, fontSize: number, color: string) {
+  const compositionInput = input.composition;
+  if (!compositionInput?.enabled || !compositionInput.plainText.trim()) return;
+  const timestamp = new Date().toISOString();
+  const id = compositionIdForTextUnit(unit.id);
+  const existing = mutableTextCompositions.find((composition) => composition.id === id);
+  const composition: TextComposition = {
+    box,
+    chapterId: unit.chapterId,
+    content: null,
+    createdAt: existing?.createdAt ?? timestamp,
+    effects: undefined,
+    id,
+    isLocked: false,
+    kind: compositionInput.kind ?? "dialogue",
+    layout: defaultCompositionLayout(),
+    manualFields: compositionInput.manualFields ?? [],
+    origin: compositionInput.origin ?? null,
+    pageId: unit.pageId,
+    plainText: compositionInput.plainText,
+    presetId: compositionInput.presetId ?? (color === "#F7F2E8" ? "text_preset_global_black_bubble" : "text_preset_global_normal_dialogue"),
+    renderOrder: unit.order,
+    source: compositionInput.source ?? "auto",
+    style: {
+      color,
+      fontFamily: "JF Flat",
+      fontSize,
+      fontWeight: 800,
+      opacity: 1,
+    },
+    textUnitId: unit.id,
+    updatedAt: timestamp,
+  };
+  mutableTextCompositions = existing
+    ? mutableTextCompositions.map((item) => (item.id === id ? composition : item))
+    : [...mutableTextCompositions, composition];
 }
 
 export async function listProjects(): Promise<Project[]> {
@@ -385,7 +508,8 @@ export async function getChapterForTranslation(
     chapter,
     pages: chapterPages,
     pageEditMarks: mutablePageEditMarks.filter((mark) => mark.chapterId === chapterId),
-    textCompositions: [],
+    textCompositions: mutableTextCompositions.filter((composition) => composition.chapterId === chapterId),
+    textStylePresets: mockTextStylePresets,
     textUnits: mutableTextUnits.filter((unit) => unit.chapterId === chapterId),
     characters: mutableCharacters.filter((character) => character.projectId === project.id),
     glossaryTerms: mutableGlossaryTerms.filter((term) => term.projectId === project.id),
@@ -901,8 +1025,66 @@ export async function updateTextUnitTypesetting(
       ? { ...unit, typesetting: { ...unit.typesetting, box, color: input.color ?? unit.typesetting?.color ?? "#17110B", fontSize } }
       : unit,
   );
+  upsertMockCompositionForTextUnit(existing, input, box, fontSize, input.color ?? existing.typesetting?.color ?? "#17110B");
 
   return delay({ box, chapterId: existing.chapterId, color: input.color ?? existing.typesetting?.color ?? "#17110B", fontSize, id: textUnitId }, 80);
+}
+
+export async function updateTextComposition(
+  compositionId: string,
+  input: TextCompositionUpdateInput,
+): Promise<TextComposition> {
+  if (window.florisApi) return window.florisApi.updateTextComposition(compositionId, input);
+
+  const existing = mutableTextCompositions.find((composition) => composition.id === compositionId);
+  if (!existing) throw new Error("Text composition not found");
+
+  const preset = input.presetId
+    ? mockTextStylePresets.find((item) => item.id === input.presetId)
+    : input.resetToPreset && existing.presetId
+      ? mockTextStylePresets.find((item) => item.id === existing.presetId)
+      : undefined;
+  const baseStyle = preset ? preset.style : existing.style;
+  const baseLayout = preset ? preset.layout : existing.layout;
+  const baseEffects = preset ? preset.effects : existing.effects;
+  const updated: TextComposition = {
+    ...existing,
+    box: input.box ?? existing.box,
+    effects: input.stroke
+      ? { ...(baseEffects ?? {}), stroke: { color: normalizeTextColor(input.stroke.color, baseStyle.stroke?.color ?? "#FFFFFF"), enabled: Boolean(input.stroke.enabled), opacity: input.stroke.opacity ?? baseStyle.stroke?.opacity ?? 1, width: input.stroke.width ?? baseStyle.stroke?.width ?? 2 } }
+      : baseEffects,
+    kind: input.kind ?? preset?.kind ?? existing.kind,
+    layout: baseLayout,
+    manualFields: Array.from(new Set([
+      ...(input.resetToPreset ? [] : existing.manualFields),
+      ...(input.box ? ["box"] : []),
+      ...(input.color ? ["color"] : []),
+      ...(input.fontSize != null ? ["fontSize"] : []),
+      ...(input.presetId !== undefined ? ["preset"] : []),
+      ...(input.stroke ? ["stroke"] : []),
+    ])) as TextComposition["manualFields"],
+    presetId: input.presetId !== undefined ? input.presetId : existing.presetId,
+    style: {
+      ...baseStyle,
+      color: input.color ? normalizeTextColor(input.color, baseStyle.color) : baseStyle.color,
+      fontSize: input.fontSize == null ? baseStyle.fontSize : clampFontSize(input.fontSize),
+      ...(input.stroke ? { stroke: { color: normalizeTextColor(input.stroke.color, baseStyle.stroke?.color ?? "#FFFFFF"), enabled: Boolean(input.stroke.enabled), opacity: input.stroke.opacity ?? baseStyle.stroke?.opacity ?? 1, width: input.stroke.width ?? baseStyle.stroke?.width ?? 2 } } : {}),
+    },
+    updatedAt: new Date().toISOString(),
+  };
+  mutableTextCompositions = mutableTextCompositions.map((composition) =>
+    composition.id === compositionId ? updated : composition,
+  );
+
+  if (updated.textUnitId) {
+    mutableTextUnits = mutableTextUnits.map((unit) =>
+      unit.id === updated.textUnitId
+        ? { ...unit, typesetting: { ...unit.typesetting, box: updated.box, color: updated.style.color, fontSize: updated.style.fontSize } }
+        : unit,
+    );
+  }
+
+  return delay(updated, 80);
 }
 
 export async function updateChapterTextSize(

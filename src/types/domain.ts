@@ -1,9 +1,21 @@
 import type {
+  CompositionStroke,
   TextComposition,
   TextCompositionKind,
   TextCompositionManualField,
   TextCompositionOrigin,
   TextCompositionSource,
+  TextStylePreset,
+} from "../text-composition/types";
+
+export type {
+  CompositionStroke,
+  TextComposition,
+  TextCompositionKind,
+  TextCompositionManualField,
+  TextCompositionOrigin,
+  TextCompositionSource,
+  TextStylePreset,
 } from "../text-composition/types";
 
 export type ProjectStatus = "Active" | "Paused" | "Completed" | "Archived";
@@ -360,6 +372,7 @@ export interface ChapterTranslationWorkspace {
   pages: Page[];
   pageEditMarks: PageEditMark[];
   textCompositions: TextComposition[];
+  textStylePresets: TextStylePreset[];
   textUnits: TextUnit[];
   characters: Character[];
   glossaryTerms: GlossaryTerm[];
@@ -449,6 +462,16 @@ export interface TextUnitTypesettingCompositionInput {
   plainText: string;
   presetId?: string | null;
   source?: TextCompositionSource;
+}
+
+export interface TextCompositionUpdateInput {
+  box?: RegionBox;
+  color?: string;
+  fontSize?: number;
+  kind?: TextCompositionKind;
+  presetId?: string | null;
+  resetToPreset?: boolean;
+  stroke?: Partial<CompositionStroke>;
 }
 
 export interface ChapterTextSizeInput {

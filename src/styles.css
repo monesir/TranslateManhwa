@@ -2006,6 +2006,10 @@ h3 {
   pointer-events: none;
 }
 
+.edit-work-layer.is-passive .text-composition-item {
+  pointer-events: none;
+}
+
 .edit-drawing-layer {
   position: absolute;
   inset: 0;
@@ -2141,8 +2145,24 @@ h3 {
 .text-composition-item {
   position: absolute;
   display: flex;
+  margin: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: move;
+  font: inherit;
   pointer-events: none;
   user-select: none;
+}
+
+.text-composition-layer.is-interactive .text-composition-item {
+  pointer-events: auto;
+}
+
+.text-composition-item:hover,
+.text-composition-item.selected {
+  border-color: #b78322;
+  box-shadow: 0 0 0 2px rgba(217, 164, 65, 0.24);
 }
 
 .text-composition-content {
@@ -2540,6 +2560,51 @@ h3 {
 .text-size-panel {
   display: grid;
   gap: 12px;
+}
+
+.composition-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.composition-control {
+  display: grid;
+  gap: 6px;
+}
+
+.composition-control span,
+.composition-color-row span,
+.composition-check span {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.composition-select {
+  max-width: none;
+}
+
+.composition-color-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.composition-color-row label {
+  display: grid;
+  gap: 6px;
+}
+
+.composition-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.composition-check input {
+  accent-color: var(--accent);
 }
 
 .auto-typeset-panel {

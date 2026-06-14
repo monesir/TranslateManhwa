@@ -15,6 +15,28 @@ function roundCoordinate(value) {
   return Math.round(Number(value ?? 0) * 100) / 100;
 }
 
+function clamp(value, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return min;
+  return Math.max(min, Math.min(max, number));
+}
+
+function normalizeColor(value, fallback = "#17110B") {
+  const color = String(value ?? "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color.toUpperCase();
+  if (/^#[0-9a-f]{3}$/i.test(color)) {
+    const [, r, g, b] = color;
+    return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
+  return fallback;
+}
+
+function normalizeFontSize(value, fallback = 18) {
+  const size = Number(value);
+  if (!Number.isFinite(size)) return fallback;
+  return Math.max(8, Math.min(360, Math.round(size)));
+}
+
 function normalizeBox(value, fallback = { type: "box", x: 0, y: 0, width: 16, height: 12 }) {
   const box = typeof value === "string" ? parseJson(value, fallback) : value;
   const x = Number(box?.x);
@@ -28,6 +50,65 @@ function normalizeBox(value, fallback = { type: "box", x: 0, y: 0, width: 16, he
     y: roundCoordinate(Math.max(0, y)),
     width: roundCoordinate(Math.max(1, width)),
     height: roundCoordinate(Math.max(1, height)),
+  };
+}
+
+const MANUAL_FIELD_SET = new Set([
+  "plainText",
+  "content",
+  "box",
+  "preset",
+  "kind",
+  "fontFamily",
+  "fontSize",
+  "fontWeight",
+  "color",
+  "opacity",
+  "stroke",
+  "shadow",
+  "background",
+  "layout",
+  "effects",
+  "renderOrder",
+]);
+
+const PRESET_RESET_FIELDS = [
+  "preset",
+  "kind",
+  "fontFamily",
+  "fontSize",
+  "fontWeight",
+  "color",
+  "opacity",
+  "stroke",
+  "shadow",
+  "background",
+  "layout",
+  "effects",
+];
+
+function normalizeManualFields(fields) {
+  return Array.from(new Set((Array.isArray(fields) ? fields : [])
+    .map((field) => String(field ?? "").trim())
+    .filter((field) => MANUAL_FIELD_SET.has(field))));
+}
+
+function addManualFields(fields, nextFields) {
+  return normalizeManualFields([...normalizeManualFields(fields), ...nextFields]);
+}
+
+function removeManualFields(fields, fieldsToRemove) {
+  const removeSet = new Set(fieldsToRemove);
+  return normalizeManualFields(fields).filter((field) => !removeSet.has(field));
+}
+
+function normalizeStroke(input, fallback = {}) {
+  const enabled = input?.enabled == null ? Boolean(fallback?.enabled) : Boolean(input.enabled);
+  return {
+    color: normalizeColor(input?.color, normalizeColor(fallback?.color, "#FFFFFF")),
+    enabled,
+    opacity: clamp(input?.opacity ?? fallback?.opacity ?? 1, 0, 1),
+    width: roundCoordinate(Math.max(0, Number(input?.width ?? fallback?.width ?? 2))),
   };
 }
 
@@ -124,6 +205,20 @@ class TextCompositionRepository {
       .map(mapCompositionRow);
   }
 
+  getTextStylePreset(presetId) {
+    const id = String(presetId ?? "").trim();
+    if (!id) return null;
+    const row = this.db.prepare("SELECT * FROM text_style_presets WHERE id = ?").get(id);
+    return row ? mapPresetRow(row) : null;
+  }
+
+  getTextComposition(compositionId) {
+    const id = String(compositionId ?? "").trim();
+    if (!id) return null;
+    const row = this.db.prepare("SELECT * FROM text_compositions WHERE id = ?").get(id);
+    return row ? mapCompositionRow(row) : null;
+  }
+
   upsertTextComposition(input) {
     const timestamp = new Date().toISOString();
     const id = String(input?.id ?? "").trim() || textCompositionId();
@@ -185,6 +280,114 @@ class TextCompositionRepository {
     );
 
     return mapCompositionRow(this.db.prepare("SELECT * FROM text_compositions WHERE id = ?").get(id));
+  }
+
+  updateTextComposition(compositionId, input = {}) {
+    const id = String(compositionId ?? "").trim();
+    if (!id) throw new Error("Text composition id is required");
+
+    const row = this.db.prepare("SELECT * FROM text_compositions WHERE id = ?").get(id);
+    if (!row) throw new Error("Text composition not found");
+
+    const timestamp = new Date().toISOString();
+    let box = normalizeBox(row.box_json);
+    let kind = String(row.kind ?? "dialogue");
+    let presetId = row.preset_id ?? null;
+    let style = parseJson(row.style_json, {});
+    let layout = parseJson(row.layout_json, {});
+    let effects = parseJson(row.effect_json, undefined);
+    let manualFields = normalizeManualFields(parseJson(row.manual_fields_json, []));
+
+    const applyPreset = (nextPresetId, { resetManualFields = false } = {}) => {
+      const preset = this.getTextStylePreset(nextPresetId);
+      if (!preset) throw new Error("Text style preset not found");
+      presetId = preset.id;
+      kind = preset.kind;
+      style = preset.style ?? {};
+      layout = preset.layout ?? {};
+      effects = preset.effects;
+      manualFields = resetManualFields
+        ? removeManualFields(manualFields, PRESET_RESET_FIELDS)
+        : addManualFields(manualFields, ["preset"]);
+    };
+
+    if (input?.resetToPreset) {
+      const resetPresetId = input?.presetId !== undefined ? input.presetId : presetId;
+      if (!resetPresetId) throw new Error("Text composition has no preset to reset");
+      applyPreset(resetPresetId, { resetManualFields: true });
+    } else if (input?.presetId !== undefined) {
+      if (input.presetId) {
+        applyPreset(input.presetId);
+      } else {
+        presetId = null;
+        manualFields = addManualFields(manualFields, ["preset"]);
+      }
+    }
+
+    if (input?.box) {
+      box = normalizeBox(input.box, box);
+      manualFields = addManualFields(manualFields, ["box"]);
+    }
+
+    if (input?.kind) {
+      kind = String(input.kind);
+      manualFields = addManualFields(manualFields, ["kind"]);
+    }
+
+    if (input?.fontSize != null) {
+      style = {
+        ...style,
+        fontSize: normalizeFontSize(input.fontSize, normalizeFontSize(style.fontSize)),
+      };
+      manualFields = addManualFields(manualFields, ["fontSize"]);
+    }
+
+    if (input?.color != null) {
+      style = {
+        ...style,
+        color: normalizeColor(input.color, normalizeColor(style.color)),
+      };
+      manualFields = addManualFields(manualFields, ["color"]);
+    }
+
+    if (input?.stroke) {
+      const stroke = normalizeStroke(input.stroke, effects?.stroke ?? style?.stroke);
+      style = {
+        ...style,
+        stroke,
+      };
+      effects = {
+        ...(effects ?? {}),
+        stroke,
+      };
+      manualFields = addManualFields(manualFields, ["stroke"]);
+    }
+
+    this.db.prepare(`
+      UPDATE text_compositions
+      SET
+        preset_id = ?,
+        kind = ?,
+        box_json = ?,
+        style_json = ?,
+        layout_json = ?,
+        effect_json = ?,
+        manual_fields_json = ?,
+        updated_at = ?
+      WHERE id = ?
+    `).run(
+      presetId,
+      kind,
+      JSON.stringify(box),
+      JSON.stringify(style),
+      JSON.stringify(layout),
+      effects ? JSON.stringify(effects) : null,
+      JSON.stringify(manualFields),
+      timestamp,
+      id,
+    );
+
+    return this.getTextComposition(id);
   }
 
   deleteTextComposition(compositionId) {

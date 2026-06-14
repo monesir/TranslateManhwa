@@ -86,6 +86,10 @@ function createAppApi(db, options = {}) {
       return translationWorkspaceRepository.updateTextUnitTypesetting(textUnitId, input);
     },
 
+    updateTextComposition(compositionId, input) {
+      return translationWorkspaceRepository.updateTextComposition(compositionId, input);
+    },
+
     updateChapterTextSize(chapterId, input) {
       return translationWorkspaceRepository.updateChapterTextSize(chapterId, input);
     },

@@ -482,6 +482,7 @@ class TranslationWorkspaceRepository {
     const textCompositions = this.textCompositionRepository.listChapterCompositions(chapterId, {
       mergeOffsetsByPage,
     });
+    const textStylePresets = this.textCompositionRepository.listTextStylePresets(chapter.projectId);
 
     const pageEditMarks = this.db.prepare(`
       SELECT *
@@ -512,6 +513,7 @@ class TranslationWorkspaceRepository {
       pages,
       pageEditMarks: pageEdits,
       textCompositions,
+      textStylePresets,
       textUnits: hydratedTextUnits,
       characters: dictionary.characters,
       glossaryTerms: dictionary.glossaryTerms,
@@ -815,6 +817,84 @@ class TranslationWorkspaceRepository {
       fontSize: typesetting.fontSize,
       id: textUnitId,
     };
+  }
+
+  getTextCompositionUpdateState(compositionId) {
+    return this.db.prepare(`
+      SELECT
+        tc.id,
+        tc.chapter_id,
+        tc.page_id,
+        tc.text_unit_id,
+        pms.merged_page_id,
+        pms.x AS merge_offset_x,
+        pms.y AS merge_offset_y
+      FROM text_compositions tc
+      LEFT JOIN page_merge_sources pms ON pms.source_page_id = tc.page_id
+      WHERE tc.id = ?
+    `).get(compositionId);
+  }
+
+  displayCompositionForMergeState(composition, state) {
+    if (!composition || !state?.merged_page_id) return composition;
+    return {
+      ...composition,
+      box: {
+        ...composition.box,
+        x: roundBoxCoordinate(composition.box.x + Number(state.merge_offset_x ?? 0)),
+        y: roundBoxCoordinate(composition.box.y + Number(state.merge_offset_y ?? 0)),
+      },
+      pageId: state.merged_page_id,
+    };
+  }
+
+  updateLegacyTypesettingForComposition(state, composition, timestamp) {
+    if (!state?.text_unit_id || !composition) return;
+    const existing = this.getTextUnitTypesettingState(state.text_unit_id);
+    if (!existing) return;
+
+    const currentTypesetting = this.normalizeTypesetting(existing);
+    this.upsertTextUnitTypesettingItem(state.text_unit_id, {
+      ...currentTypesetting,
+      box: composition.box,
+      color: normalizeOptionalColor(composition.style?.color, currentTypesetting.color),
+      fontSize: normalizeFontSize(composition.style?.fontSize ?? currentTypesetting.fontSize),
+    }, timestamp);
+    this.db.prepare("UPDATE text_units SET updated_at = ? WHERE id = ?").run(timestamp, state.text_unit_id);
+  }
+
+  updateTextComposition(compositionId, input = {}) {
+    const state = this.getTextCompositionUpdateState(compositionId);
+    if (!state) throw new Error("Text composition not found");
+
+    const adjustedInput = { ...(input ?? {}) };
+    if (adjustedInput.box && state.merged_page_id) {
+      adjustedInput.box = {
+        ...adjustedInput.box,
+        x: roundBoxCoordinate(Number(adjustedInput.box.x ?? 0) - Number(state.merge_offset_x ?? 0)),
+        y: roundBoxCoordinate(Number(adjustedInput.box.y ?? 0) - Number(state.merge_offset_y ?? 0)),
+      };
+    }
+
+    const timestamp = new Date().toISOString();
+    let composition;
+    this.db.exec("BEGIN");
+    try {
+      composition = this.textCompositionRepository.updateTextComposition(compositionId, adjustedInput);
+      this.updateLegacyTypesettingForComposition(state, composition, timestamp);
+      this.db.prepare("UPDATE chapters SET updated_at = ? WHERE id = ?").run(timestamp, state.chapter_id);
+      this.db.prepare(`
+        UPDATE projects
+        SET updated_at = ?
+        WHERE id = (SELECT project_id FROM chapters WHERE id = ?)
+      `).run(timestamp, state.chapter_id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    return this.displayCompositionForMergeState(composition, state);
   }
 
   addPageEditMark(input) {

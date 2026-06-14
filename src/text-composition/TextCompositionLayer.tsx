@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { Page } from "../types/domain";
 import type {
   CompositionBackground,
@@ -16,7 +16,14 @@ const TEXT_COMPOSITION_RENDER_SCALE = 2.35;
 
 interface TextCompositionLayerProps {
   compositions: TextComposition[];
+  onBeginTransform?: (
+    event: ReactPointerEvent<HTMLElement>,
+    composition: TextComposition,
+    mode: "move" | "resize-nw" | "resize-ne" | "resize-sw" | "resize-se",
+  ) => void;
+  onSelect?: (composition: TextComposition) => void;
   page: Page;
+  selectedCompositionId?: string;
   zoom: number;
 }
 
@@ -126,28 +133,70 @@ function compositionSpans(composition: TextComposition): TextCompositionSpan[] {
   return [{ text: composition.plainText }];
 }
 
-export function TextCompositionLayer({ compositions, page, zoom }: TextCompositionLayerProps) {
+export function TextCompositionLayer({
+  compositions,
+  onBeginTransform,
+  onSelect,
+  page,
+  selectedCompositionId,
+  zoom,
+}: TextCompositionLayerProps) {
   const sortedCompositions = [...compositions].sort((a, b) => a.renderOrder - b.renderOrder);
+  const isInteractive = Boolean(onBeginTransform || onSelect);
 
   return (
-    <div className="text-composition-layer" data-page-id={page.id} data-page-tone={page.imageTone}>
-      {sortedCompositions.map((composition) => (
-        <div
-          className="text-composition-item"
-          data-composition-kind={composition.kind}
-          key={composition.id}
-          style={compositionStyle(composition, zoom)}
-          title={composition.plainText}
-        >
-          <span className="text-composition-content" dir={composition.layout.direction === "auto" ? "auto" : composition.layout.direction}>
-            {compositionSpans(composition).map((span, index) => (
-              <span className="text-composition-span" key={`${composition.id}-${index}`} style={spanStyle(composition, span, zoom)}>
-                {span.text}
-              </span>
-            ))}
-          </span>
-        </div>
-      ))}
+    <div
+      className={isInteractive ? "text-composition-layer is-interactive" : "text-composition-layer"}
+      data-page-id={page.id}
+      data-page-tone={page.imageTone}
+    >
+      {sortedCompositions.map((composition) => {
+        const isSelected = composition.id === selectedCompositionId;
+        return (
+          <button
+            className={isSelected ? "text-composition-item selected" : "text-composition-item"}
+            data-composition-kind={composition.kind}
+            key={composition.id}
+            onClick={() => onSelect?.(composition)}
+            onPointerDown={(event) => onBeginTransform?.(event, composition, "move")}
+            style={compositionStyle(composition, zoom)}
+            title={composition.plainText}
+            type="button"
+          >
+            <span className="text-composition-content" dir={composition.layout.direction === "auto" ? "auto" : composition.layout.direction}>
+              {compositionSpans(composition).map((span, index) => (
+                <span className="text-composition-span" key={`${composition.id}-${index}`} style={spanStyle(composition, span, zoom)}>
+                  {span.text}
+                </span>
+              ))}
+            </span>
+            {isSelected ? (
+              <>
+                <span
+                  aria-hidden="true"
+                  className="text-box-resize-handle handle-nw"
+                  onPointerDown={(event) => onBeginTransform?.(event, composition, "resize-nw")}
+                />
+                <span
+                  aria-hidden="true"
+                  className="text-box-resize-handle handle-ne"
+                  onPointerDown={(event) => onBeginTransform?.(event, composition, "resize-ne")}
+                />
+                <span
+                  aria-hidden="true"
+                  className="text-box-resize-handle handle-sw"
+                  onPointerDown={(event) => onBeginTransform?.(event, composition, "resize-sw")}
+                />
+                <span
+                  aria-hidden="true"
+                  className="text-box-resize-handle handle-se"
+                  onPointerDown={(event) => onBeginTransform?.(event, composition, "resize-se")}
+                />
+              </>
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }

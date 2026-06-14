@@ -3,12 +3,14 @@ import type { ActiveTool } from "../types/domain";
 
 interface TranslationWorkspaceState {
   selectedPageId?: string;
+  selectedTextCompositionId?: string;
   selectedTextUnitId?: string;
   activeTool: ActiveTool;
   zoom: number;
   leftPanelWidth: number;
   rightPanelWidth: number;
   setSelectedPageId: (pageId: string) => void;
+  setSelectedTextCompositionId: (textCompositionId: string) => void;
   setSelectedTextUnitId: (textUnitId: string) => void;
   setActiveTool: (tool: ActiveTool) => void;
   setZoom: (zoom: number) => void;
@@ -16,12 +18,14 @@ interface TranslationWorkspaceState {
 
 export const useTranslationWorkspaceStore = create<TranslationWorkspaceState>((set) => ({
   selectedPageId: undefined,
+  selectedTextCompositionId: undefined,
   selectedTextUnitId: undefined,
   activeTool: "select",
   zoom: 0.76,
   leftPanelWidth: 392,
   rightPanelWidth: 236,
   setSelectedPageId: (pageId) => set({ selectedPageId: pageId }),
+  setSelectedTextCompositionId: (textCompositionId) => set({ selectedTextCompositionId: textCompositionId }),
   setSelectedTextUnitId: (textUnitId) => set({ selectedTextUnitId: textUnitId }),
   setActiveTool: (tool) => set({ activeTool: tool }),
   setZoom: (zoom) => set({ zoom: Math.max(0.45, Math.min(1.2, zoom)) }),

@@ -101,6 +101,7 @@ import {
   runOcrForRegion,
   samplePageColor,
   searchSourceTitles,
+  updateTextComposition,
   updateCharacter,
   updateChapterTextSize,
   updateFinalTranslation,
@@ -142,6 +143,9 @@ import type {
   SourceCatalogItem,
   SourceChapterSummary,
   SourceTitleSummary,
+  TextComposition,
+  TextCompositionUpdateInput,
+  TextStylePreset,
   TextUnit,
   TextUnitTypesettingInput,
   TranslationLevel,
@@ -179,6 +183,18 @@ const sourceStatusOptions: OcrSourceStatus[] = [
   "OCR Ready",
   "Ignored",
   "Empty",
+];
+const textCompositionKindOptions: TextComposition["kind"][] = [
+  "dialogue",
+  "thought",
+  "narration",
+  "shout",
+  "whisper",
+  "aside",
+  "sfx",
+  "title",
+  "sign",
+  "unknown",
 ];
 
 function isAutoCleanPatch(mark: PageEditMark) {
@@ -260,9 +276,26 @@ interface TextBoxDragState {
   zoom: number;
 }
 
+interface TextCompositionBoxDragState {
+  compositionId: string;
+  currentBox: RegionBox;
+  didMove: boolean;
+  mode: TextBoxDragMode;
+  page: Page;
+  startBox: RegionBox;
+  startClientX: number;
+  startClientY: number;
+  zoom: number;
+}
+
 interface TextBoxDraftState {
   box: RegionBox;
   textUnitId: string;
+}
+
+interface TextCompositionBoxDraftState {
+  box: RegionBox;
+  compositionId: string;
 }
 
 interface DrawStrokeState {
@@ -3163,6 +3196,7 @@ function TranslationPage() {
   const editPaneScrollRef = useRef<HTMLDivElement | null>(null);
   const splitStageRef = useRef<HTMLDivElement | null>(null);
   const textBoxDragRef = useRef<TextBoxDragState | null>(null);
+  const textCompositionBoxDragRef = useRef<TextCompositionBoxDragState | null>(null);
   const drawStrokeRef = useRef<DrawStrokeState | null>(null);
   const scrollSyncRef = useRef<"edit" | "original" | null>(null);
   const translationScreenRef = useRef<HTMLElement | null>(null);
@@ -3186,6 +3220,7 @@ function TranslationPage() {
   const [cleanSelection, setCleanSelection] = useState<OcrSelectionState | null>(null);
   const [restoreAreaSelection, setRestoreAreaSelection] = useState<OcrSelectionState | null>(null);
   const [textBoxDraft, setTextBoxDraft] = useState<TextBoxDraftState | null>(null);
+  const [textCompositionBoxDraft, setTextCompositionBoxDraft] = useState<TextCompositionBoxDraftState | null>(null);
   const [drawStroke, setDrawStroke] = useState<DrawStrokeState | null>(null);
   const [brushColor, setBrushColor] = useState(DEFAULT_BRUSH_COLOR);
   const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE);
@@ -3206,10 +3241,12 @@ function TranslationPage() {
   const [henryStatus, setHenryStatus] = useState("");
   const {
     selectedPageId,
+    selectedTextCompositionId,
     selectedTextUnitId,
     activeTool,
     zoom,
     setSelectedPageId,
+    setSelectedTextCompositionId,
     setSelectedTextUnitId,
     setActiveTool,
     setZoom,
@@ -3287,6 +3324,45 @@ function TranslationPage() {
     },
     onError: () => {
       setTextBoxDraft(null);
+    },
+  });
+  const updateTextCompositionMutation = useMutation({
+    mutationFn: ({ compositionId, input }: { compositionId: string; input: TextCompositionUpdateInput }) =>
+      updateTextComposition(compositionId, input),
+    onSuccess: (result) => {
+      queryClient.setQueryData<ChapterTranslationWorkspace | undefined>(
+        ["translation-workspace", result.chapterId],
+        (current) => current
+          ? {
+            ...current,
+            textCompositions: current.textCompositions.map((composition) =>
+              composition.id === result.id ? result : composition,
+            ),
+            textUnits: result.textUnitId
+              ? current.textUnits.map((unit) => unit.id === result.textUnitId
+                ? {
+                  ...unit,
+                  typesetting: {
+                    ...unit.typesetting,
+                    box: result.box,
+                    color: result.style.color,
+                    fontSize: result.style.fontSize,
+                  },
+                }
+                : unit)
+              : current.textUnits,
+          }
+          : current,
+      );
+      setSelectedTextCompositionId(result.id);
+      if (result.textUnitId) setSelectedTextUnitId(result.textUnitId);
+      setTextCompositionBoxDraft((draft) => (draft?.compositionId === result.id ? null : draft));
+      queryClient.invalidateQueries({ queryKey: ["translation-workspace", result.chapterId] });
+      queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+    },
+    onError: () => {
+      setTextCompositionBoxDraft(null);
     },
   });
   const updateChapterTextSizeMutation = useMutation({
@@ -3546,11 +3622,30 @@ function TranslationPage() {
     if (!workspace) return;
     const firstPageId = workspace.pages[0]?.id;
     const firstTextUnitId = workspace.textUnits[0]?.id;
+    const compositionForSelectedTextUnit = workspace.textCompositions.find((composition) =>
+      composition.textUnitId === selectedTextUnitId,
+    );
+    const firstTextCompositionId = compositionForSelectedTextUnit?.id ?? workspace.textCompositions[0]?.id;
     const hasSelectedPage = workspace.pages.some((page) => page.id === selectedPageId);
     const hasSelectedTextUnit = workspace.textUnits.some((unit) => unit.id === selectedTextUnitId);
+    const hasSelectedTextComposition = workspace.textCompositions.some((composition) =>
+      composition.id === selectedTextCompositionId,
+    );
     if (!hasSelectedPage && firstPageId) setSelectedPageId(firstPageId);
     if (!hasSelectedTextUnit && firstTextUnitId) setSelectedTextUnitId(firstTextUnitId);
-  }, [workspace, selectedPageId, selectedTextUnitId, setSelectedPageId, setSelectedTextUnitId]);
+    if (!hasSelectedTextComposition) {
+      const nextCompositionId = firstTextCompositionId ?? "";
+      if (selectedTextCompositionId !== nextCompositionId) setSelectedTextCompositionId(nextCompositionId);
+    }
+  }, [
+    workspace,
+    selectedPageId,
+    selectedTextCompositionId,
+    selectedTextUnitId,
+    setSelectedPageId,
+    setSelectedTextCompositionId,
+    setSelectedTextUnitId,
+  ]);
 
   useEffect(() => {
     if (viewerMode !== "webtoon" || !selectedPageId) return;
@@ -3595,6 +3690,23 @@ function TranslationPage() {
   const explicitSelectedTextUnit = workspace.textUnits.find((unit) => unit.id === selectedTextUnitId);
   const selectedTextUnit = explicitSelectedTextUnit ?? workspace.textUnits[0];
   const selectedFontSize = clampTextUnitFontSize(selectedTextUnit?.typesetting.fontSize ?? 18);
+  const textCompositionForSelectedUnit = workspace.textCompositions.find((composition) =>
+    composition.textUnitId === selectedTextUnit?.id,
+  );
+  const explicitSelectedTextComposition = workspace.textCompositions.find((composition) =>
+    composition.id === selectedTextCompositionId,
+  );
+  const textStylePresets = workspace.textStylePresets ?? [];
+  const selectedTextComposition = explicitSelectedTextComposition ?? textCompositionForSelectedUnit ?? workspace.textCompositions[0];
+  const selectedTextCompositionPreset = selectedTextComposition
+    ? textStylePresets.find((preset) => preset.id === selectedTextComposition.presetId)
+    : undefined;
+  const selectedCompositionFontSize = clampTextUnitFontSize(selectedTextComposition?.style.fontSize ?? 18);
+  const selectedCompositionColor = normalizeHexColor(selectedTextComposition?.style.color, TYPESET_DARK_TEXT_COLOR);
+  const selectedCompositionStroke = selectedTextComposition?.effects?.stroke ?? selectedTextComposition?.style.stroke;
+  const selectedCompositionStrokeEnabled = Boolean(selectedCompositionStroke?.enabled);
+  const selectedCompositionStrokeColor = normalizeHexColor(selectedCompositionStroke?.color, "#FFFFFF");
+  const selectedCompositionStrokeWidth = clampNumber(Number(selectedCompositionStroke?.width ?? 2), 0, 24);
 
   const selectedDictionaryText = dictionaryTextForUnit(selectedTextUnit);
   const matchedCharacterIdSet = new Set(selectedTextUnit?.matchedCharacterIds ?? []);
@@ -3616,7 +3728,14 @@ function TranslationPage() {
   };
   const selectTextUnit = (unit: TextUnit) => {
     setSelectedTextUnitId(unit.id);
+    const linkedComposition = workspace.textCompositions.find((composition) => composition.textUnitId === unit.id);
+    if (linkedComposition) setSelectedTextCompositionId(linkedComposition.id);
     selectPage(unit.pageId);
+  };
+  const selectTextComposition = (composition: TextComposition) => {
+    setSelectedTextCompositionId(composition.id);
+    if (composition.textUnitId) setSelectedTextUnitId(composition.textUnitId);
+    selectPage(composition.pageId);
   };
   const syncPaneScroll = (sourceName: "edit" | "original") => {
     const source = sourceName === "original" ? originalPaneScrollRef.current : editPaneScrollRef.current;
@@ -3695,6 +3814,59 @@ function TranslationPage() {
     return measureAutoTypesetFontSize(autoTypesetMeasureRef.current, overlayText, box);
   };
   const selectedTextBox = selectedTextUnit ? textBoxForUnit(selectedTextUnit) : undefined;
+  const textBoxForComposition = (composition: TextComposition) =>
+    textCompositionBoxDraft?.compositionId === composition.id ? textCompositionBoxDraft.box : composition.box;
+  const selectedCompositionBox = selectedTextComposition ? textBoxForComposition(selectedTextComposition) : undefined;
+  const updateSelectedComposition = (input: TextCompositionUpdateInput) => {
+    if (!selectedTextComposition || updateTextCompositionMutation.isPending) return;
+    updateTextCompositionMutation.mutate({
+      compositionId: selectedTextComposition.id,
+      input,
+    });
+  };
+  const setSelectedCompositionFontSize = (fontSize: number) => {
+    updateSelectedComposition({ fontSize: clampTextUnitFontSize(fontSize) });
+  };
+  const adjustSelectedCompositionFontSize = (delta: number) => {
+    setSelectedCompositionFontSize(selectedCompositionFontSize + delta);
+  };
+  const setSelectedCompositionColor = (color: string) => {
+    updateSelectedComposition({ color: normalizeHexColor(color, selectedCompositionColor) });
+  };
+  const setSelectedCompositionPreset = (presetId: string) => {
+    updateSelectedComposition({ presetId: presetId || null });
+  };
+  const setSelectedCompositionKind = (kind: TextComposition["kind"]) => {
+    updateSelectedComposition({ kind });
+  };
+  const setSelectedCompositionStroke = (input: { color?: string; enabled?: boolean; width?: number }) => {
+    updateSelectedComposition({
+      stroke: {
+        color: normalizeHexColor(input.color, selectedCompositionStrokeColor),
+        enabled: input.enabled ?? selectedCompositionStrokeEnabled,
+        opacity: selectedCompositionStroke?.opacity ?? 1,
+        width: input.width == null ? selectedCompositionStrokeWidth : clampNumber(input.width, 0, 24),
+      },
+    });
+  };
+  const resetSelectedCompositionToPreset = () => {
+    updateSelectedComposition({ resetToPreset: true });
+  };
+  const setSelectedCompositionBox = (box: RegionBox) => {
+    if (!selectedTextComposition || updateTextCompositionMutation.isPending) return;
+    const page = workspace.pages.find((item) => item.id === selectedTextComposition.pageId) ?? currentPage;
+    updateTextCompositionMutation.mutate({
+      compositionId: selectedTextComposition.id,
+      input: { box: clampTextBoxToPage(box, page) },
+    });
+  };
+  const updateSelectedCompositionBoxField = (field: "x" | "y" | "width" | "height", value: number) => {
+    if (!selectedCompositionBox || !Number.isFinite(value)) return;
+    setSelectedCompositionBox({
+      ...selectedCompositionBox,
+      [field]: value,
+    });
+  };
   const currentPageTranslatedUnitCount = pageTextUnits.filter((unit) => getAutoTypesetText(unit)).length;
   const isHenryRunning = henryScope !== null;
   const isAutoTypesetting = updateTextUnitTypesettingMutation.isPending || isHenryRunning;
@@ -3864,6 +4036,12 @@ function TranslationPage() {
       textUnitId,
     });
   };
+  const commitTextCompositionBoxTransform = (compositionId: string, box: RegionBox) => {
+    updateTextCompositionMutation.mutate({
+      compositionId,
+      input: { box },
+    });
+  };
   const beginTextBoxTransform = (
     event: PointerEvent<HTMLElement>,
     unit: TextUnit,
@@ -3926,6 +4104,73 @@ function TranslationPage() {
         return;
       }
       commitTextBoxTransform(currentDragState.textUnitId, currentDragState.currentBox);
+    };
+
+    document.addEventListener("pointermove", handleMove);
+    document.addEventListener("pointerup", handleUp, { once: true });
+  };
+  const beginTextCompositionBoxTransform = (
+    event: PointerEvent<HTMLElement>,
+    composition: TextComposition,
+    page: Page,
+    mode: TextBoxDragMode,
+  ) => {
+    if (event.button !== 0 || updateTextCompositionMutation.isPending) return;
+    event.preventDefault();
+    event.stopPropagation();
+    selectTextComposition(composition);
+    setActiveTool("typeset");
+
+    const startBox = clampTextBoxToPage(textBoxForComposition(composition), page);
+    const dragState: TextCompositionBoxDragState = {
+      compositionId: composition.id,
+      currentBox: startBox,
+      didMove: false,
+      mode,
+      page,
+      startBox,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      zoom,
+    };
+    textCompositionBoxDragRef.current = dragState;
+    setTextCompositionBoxDraft({ box: startBox, compositionId: composition.id });
+
+    const handleMove = (moveEvent: globalThis.PointerEvent) => {
+      const currentDragState = textCompositionBoxDragRef.current;
+      if (!currentDragState) return;
+      moveEvent.preventDefault();
+      const clientDeltaX = moveEvent.clientX - currentDragState.startClientX;
+      const clientDeltaY = moveEvent.clientY - currentDragState.startClientY;
+      const clientDistance = Math.hypot(clientDeltaX, clientDeltaY);
+      if (!currentDragState.didMove && clientDistance < TEXT_BOX_DRAG_THRESHOLD_PX) return;
+      currentDragState.didMove = true;
+      const deltaX = clientDeltaX / currentDragState.zoom;
+      const deltaY = clientDeltaY / currentDragState.zoom;
+      const box = transformTextBox(
+        currentDragState.mode,
+        currentDragState.startBox,
+        deltaX,
+        deltaY,
+        currentDragState.page,
+      );
+      currentDragState.currentBox = box;
+      setTextCompositionBoxDraft({ box, compositionId: currentDragState.compositionId });
+    };
+
+    const handleUp = () => {
+      const currentDragState = textCompositionBoxDragRef.current;
+      textCompositionBoxDragRef.current = null;
+      document.removeEventListener("pointermove", handleMove);
+      document.removeEventListener("pointerup", handleUp);
+      if (!currentDragState) return;
+      if (!currentDragState.didMove) {
+        setTextCompositionBoxDraft((draft) =>
+          draft?.compositionId === currentDragState.compositionId ? null : draft,
+        );
+        return;
+      }
+      commitTextCompositionBoxTransform(currentDragState.compositionId, currentDragState.currentBox);
     };
 
     document.addEventListener("pointermove", handleMove);
@@ -4763,8 +5008,13 @@ function TranslationPage() {
     </div>
   );
   const renderEditPageSurface = (page: Page, units: TextUnit[], marks: PageEditMark[], surfaceClassName = "") => {
-    const pageTextCompositions = workspace.textCompositions.filter((composition) => composition.pageId === page.id);
+    const pageTextCompositions = workspace.textCompositions
+      .filter((composition) => composition.pageId === page.id)
+      .map((composition) => textCompositionBoxDraft?.compositionId === composition.id
+        ? { ...composition, box: textCompositionBoxDraft.box }
+        : composition);
     const shouldRenderCompositions = ENABLE_TEXT_COMPOSITIONS && pageTextCompositions.length > 0;
+    const isWorkLayerPassive = activeTool === "draw" || activeTool === "color-picker" || activeTool === "clean" || activeTool === "restore-clean" || activeTool === "restore-area";
 
     return (
       <div
@@ -4779,9 +5029,18 @@ function TranslationPage() {
       >
         {renderPageArtwork(page)}
         {renderDrawingLayer(page, marks)}
-        <div className={activeTool === "draw" || activeTool === "color-picker" || activeTool === "clean" || activeTool === "restore-clean" || activeTool === "restore-area" ? "edit-work-layer is-passive" : "edit-work-layer"}>
+        <div className={isWorkLayerPassive ? "edit-work-layer is-passive" : "edit-work-layer"}>
           {shouldRenderCompositions ? (
-            <TextCompositionLayer compositions={pageTextCompositions} page={page} zoom={zoom} />
+            <TextCompositionLayer
+              compositions={pageTextCompositions}
+              onBeginTransform={isWorkLayerPassive
+                ? undefined
+                : (event, composition, mode) => beginTextCompositionBoxTransform(event, composition, page, mode)}
+              onSelect={isWorkLayerPassive ? undefined : selectTextComposition}
+              page={page}
+              selectedCompositionId={selectedTextComposition?.id}
+              zoom={zoom}
+            />
           ) : (
             units.map((unit) => {
               const label = getOverlayText(unit);
@@ -5384,6 +5643,141 @@ function TranslationPage() {
             <h3>Selected Text</h3>
             <p>{selectedTextUnit?.sourceText}</p>
             <small>{selectedTextUnit?.reviewStatus}</small>
+          </div>
+          <div className="tool-panel composition-panel">
+            <h3>Composition</h3>
+            <p>{selectedTextComposition?.plainText || "No composition selected"}</p>
+            <label className="composition-control">
+              <span>Preset</span>
+              <select
+                className="field-select composition-select"
+                disabled={!selectedTextComposition || updateTextCompositionMutation.isPending || textStylePresets.length === 0}
+                onChange={(event) => setSelectedCompositionPreset(event.target.value)}
+                value={selectedTextComposition?.presetId ?? ""}
+              >
+                <option value="">No preset</option>
+                {textStylePresets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="composition-control">
+              <span>Kind</span>
+              <select
+                className="field-select composition-select"
+                disabled={!selectedTextComposition || updateTextCompositionMutation.isPending}
+                onChange={(event) => setSelectedCompositionKind(event.target.value as TextComposition["kind"])}
+                value={selectedTextComposition?.kind ?? "dialogue"}
+              >
+                {textCompositionKindOptions.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {kind}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="composition-color-row">
+              <label>
+                <span>Color</span>
+                <input
+                  aria-label="Composition text color"
+                  className="brush-color-input"
+                  disabled={!selectedTextComposition || updateTextCompositionMutation.isPending}
+                  onChange={(event) => setSelectedCompositionColor(event.target.value)}
+                  type="color"
+                  value={selectedCompositionColor}
+                />
+              </label>
+              <label>
+                <span>Stroke</span>
+                <input
+                  aria-label="Composition stroke color"
+                  className="brush-color-input"
+                  disabled={!selectedTextComposition || !selectedCompositionStrokeEnabled || updateTextCompositionMutation.isPending}
+                  onChange={(event) => setSelectedCompositionStroke({ color: event.target.value })}
+                  type="color"
+                  value={selectedCompositionStrokeColor}
+                />
+              </label>
+            </div>
+            <div className="text-size-control">
+              <span>Font size</span>
+              <div className="font-size-row">
+                <button
+                  className="floirs-button floirs-button--icon"
+                  disabled={!selectedTextComposition || updateTextCompositionMutation.isPending}
+                  onClick={() => adjustSelectedCompositionFontSize(-TEXT_UNIT_FONT_STEP)}
+                  title="Decrease composition text"
+                  type="button"
+                >
+                  <ZoomOut size={15} />
+                </button>
+                <input
+                  className="font-size-input"
+                  disabled={!selectedTextComposition || updateTextCompositionMutation.isPending}
+                  max={MAX_TEXT_UNIT_FONT_SIZE}
+                  min={MIN_TEXT_UNIT_FONT_SIZE}
+                  onChange={(event) => setSelectedCompositionFontSize(Number(event.target.value))}
+                  step={TEXT_UNIT_FONT_STEP}
+                  type="number"
+                  value={selectedTextComposition ? selectedCompositionFontSize : ""}
+                />
+                <button
+                  className="floirs-button floirs-button--icon"
+                  disabled={!selectedTextComposition || updateTextCompositionMutation.isPending}
+                  onClick={() => adjustSelectedCompositionFontSize(TEXT_UNIT_FONT_STEP)}
+                  title="Increase composition text"
+                  type="button"
+                >
+                  <ZoomIn size={15} />
+                </button>
+              </div>
+            </div>
+            <label className="composition-check">
+              <input
+                checked={selectedCompositionStrokeEnabled}
+                disabled={!selectedTextComposition || updateTextCompositionMutation.isPending}
+                onChange={(event) => setSelectedCompositionStroke({ enabled: event.target.checked })}
+                type="checkbox"
+              />
+              <span>Enable stroke</span>
+            </label>
+            <div className="brush-size-row">
+              <span>Stroke</span>
+              <input
+                className="brush-size-range"
+                disabled={!selectedTextComposition || !selectedCompositionStrokeEnabled || updateTextCompositionMutation.isPending}
+                max={24}
+                min={0}
+                onChange={(event) => setSelectedCompositionStroke({ width: Number(event.target.value) })}
+                type="range"
+                value={selectedCompositionStrokeWidth}
+              />
+              <input
+                className="brush-size-input"
+                disabled={!selectedTextComposition || !selectedCompositionStrokeEnabled || updateTextCompositionMutation.isPending}
+                max={24}
+                min={0}
+                onChange={(event) => setSelectedCompositionStroke({ width: Number(event.target.value) })}
+                type="number"
+                value={selectedCompositionStrokeWidth}
+              />
+            </div>
+            <button
+              className="button secondary full-width"
+              disabled={!selectedTextComposition || !selectedTextComposition.presetId || updateTextCompositionMutation.isPending}
+              onClick={resetSelectedCompositionToPreset}
+              type="button"
+            >
+              Reset to preset
+            </button>
+            <small>
+              {selectedTextCompositionPreset
+                ? `Preset: ${selectedTextCompositionPreset.name}`
+                : "Manual or generated composition"}
+            </small>
           </div>
           <div className="tool-panel draw-panel">
             <h3>Brush</h3>

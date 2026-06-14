@@ -38,6 +38,8 @@ import type {
   SourceTitleDetailsResult,
   SourceTitleSummary,
   TextUnit,
+  TextComposition,
+  TextCompositionUpdateInput,
   TextUnitTypesettingInput,
   TranslateTextUnitsInput,
   TranslateTextUnitsResult,
@@ -75,6 +77,10 @@ interface FlorisApi {
     textUnitId: string,
     input: TextUnitTypesettingInput,
   ): Promise<{ box: RegionBox; chapterId: string; color?: string; fontSize: number; id: string }>;
+  updateTextComposition(
+    compositionId: string,
+    input: TextCompositionUpdateInput,
+  ): Promise<TextComposition>;
   updateChapterTextSize(
     chapterId: string,
     input: ChapterTextSizeInput,
